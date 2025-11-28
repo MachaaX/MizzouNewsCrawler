@@ -815,6 +815,43 @@ def handle_extraction_command(args) -> int:
         extractor.close_persistent_driver()
 
 
+def _strip_common_boilerplate(content: str) -> str:
+    """Strip common boilerplate patterns to measure actual article content.
+    
+    Removes login forms, subscription prompts, navigation menus, and other
+    non-article content that inflates content length without providing value.
+    """
+    if not content or len(content) < 50:
+        return content
+        
+    # Common boilerplate patterns
+    boilerplate_indicators = [
+        r'Get up-to-the-minute news',
+        r'Submitting this form below',
+        r'Email or Screen Name',
+        r'CAPTCHA',
+        r'Subscribe to continue reading',
+        r'Sign up for our newsletter',
+        r'Already a subscriber\?',
+        r'Log in to your account',
+    ]
+    
+    # Remove lines containing boilerplate
+    lines = content.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        line_lower = line.lower()
+        is_boilerplate = any(
+            indicator.lower() in line_lower 
+            for indicator in boilerplate_indicators
+        )
+        if not is_boilerplate and line.strip():
+            cleaned_lines.append(line)
+    
+    return '\n'.join(cleaned_lines)
+
+
 def _process_batch(
     args,
     extractor,
@@ -1110,9 +1147,28 @@ def _process_batch(
 
                     now = datetime.utcnow()
                     content_text = content.get("content", "")
-                    text_hash = (
-                        calculate_content_hash(content_text) if content_text else None
-                    )
+                    
+                    # Validate content length - skip articles with insufficient content
+                    # Apply boilerplate stripping first to check actual article content
+                    MIN_CONTENT_LENGTH = 150
+                    stripped_content = _strip_common_boilerplate(content_text) if content_text else ""
+                    
+                    if not stripped_content or len(stripped_content.strip()) < MIN_CONTENT_LENGTH:
+                        logger.warning(
+                            f"Skipping article with insufficient content "
+                            f"({len(stripped_content.strip()) if stripped_content else 0} chars non-boilerplate < {MIN_CONTENT_LENGTH}): {url}"
+                        )
+                        # Mark as extracted but don't save to articles table
+                        safe_session_execute(
+                            session,
+                            CANDIDATE_STATUS_UPDATE_SQL,
+                            {"status": "extracted", "id": str(url_id)},
+                        )
+                        session.commit()
+                        processed += 1
+                        continue
+                    
+                    text_hash = calculate_content_hash(content_text)
 
                     metrics.set_content_type_detection(detection_payload)
                     metrics.finalize(content or {})
