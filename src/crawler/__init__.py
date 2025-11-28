@@ -2512,14 +2512,15 @@ class ContentExtractor:
 
         # Check for obvious truncation patterns
         suspicious_patterns = [
-            # Starts with lowercase (likely truncated from middle of sentence)
-            r"^[a-z]",
-            # Starts with common word endings/fragments
+            # Starts with common word endings/fragments (truncated)
             r"^(peat|ing|ed|ly|tion|ment|ness|ers?|s)\b",
             # Very short titles (less than 10 chars, too short for news)
             r"^.{1,9}$",
             # Contains only numbers/punctuation
             r"^[\d\s\-.,;:!?]+$",
+            # Starts with lowercase AND very short (likely truncated)
+            # Allow longer lowercase titles (artist names, stylized titles, etc.)
+            r"^[a-z].{0,14}$",
         ]
 
         import re
