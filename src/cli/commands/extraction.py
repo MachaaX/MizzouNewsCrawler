@@ -555,6 +555,9 @@ def handle_extraction_command(args) -> int:
 
     extractor = extractor_cls()
     byline_cleaner = BylineCleaner()
+    content_cleaner = BalancedBoundaryContentCleaner(
+        enable_telemetry=False  # Don't need telemetry for validation-only cleaning
+    )
     telemetry = ComprehensiveExtractionTelemetry()
 
     # Track hosts that return 403 responses within this run
@@ -597,6 +600,7 @@ def handle_extraction_command(args) -> int:
                 args,
                 extractor,
                 byline_cleaner,
+                content_cleaner,
                 telemetry,
                 batch_size,
                 batch_num,
@@ -815,47 +819,11 @@ def handle_extraction_command(args) -> int:
         extractor.close_persistent_driver()
 
 
-def _strip_common_boilerplate(content: str) -> str:
-    """Strip common boilerplate patterns to measure actual article content.
-    
-    Removes login forms, subscription prompts, navigation menus, and other
-    non-article content that inflates content length without providing value.
-    """
-    if not content or len(content) < 50:
-        return content
-        
-    # Common boilerplate patterns
-    boilerplate_indicators = [
-        r'Get up-to-the-minute news',
-        r'Submitting this form below',
-        r'Email or Screen Name',
-        r'CAPTCHA',
-        r'Subscribe to continue reading',
-        r'Sign up for our newsletter',
-        r'Already a subscriber\?',
-        r'Log in to your account',
-    ]
-    
-    # Remove lines containing boilerplate
-    lines = content.split('\n')
-    cleaned_lines = []
-    
-    for line in lines:
-        line_lower = line.lower()
-        is_boilerplate = any(
-            indicator.lower() in line_lower 
-            for indicator in boilerplate_indicators
-        )
-        if not is_boilerplate and line.strip():
-            cleaned_lines.append(line)
-    
-    return '\n'.join(cleaned_lines)
-
-
 def _process_batch(
     args,
     extractor,
     byline_cleaner,
+    content_cleaner,
     telemetry,
     per_batch,
     batch_num,
@@ -1149,9 +1117,19 @@ def _process_batch(
                     content_text = content.get("content", "")
                     
                     # Validate content length - skip articles with insufficient content
-                    # Apply boilerplate stripping first to check actual article content
+                    # Use database-driven boilerplate cleaning to strip domain-specific patterns
                     MIN_CONTENT_LENGTH = 150
-                    stripped_content = _strip_common_boilerplate(content_text) if content_text else ""
+                    if content_text:
+                        from urllib.parse import urlparse
+                        domain = urlparse(url).netloc
+                        # Clean content using persistent patterns from database
+                        stripped_content, _ = content_cleaner.process_single_article(
+                            text=content_text,
+                            domain=domain,
+                            dry_run=True  # Don't modify the original content
+                        )
+                    else:
+                        stripped_content = ""
                     
                     if not stripped_content or len(stripped_content.strip()) < MIN_CONTENT_LENGTH:
                         logger.warning(
