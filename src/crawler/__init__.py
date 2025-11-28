@@ -1185,6 +1185,12 @@ class ContentExtractor:
                 raise  # Re-raise to prevent BeautifulSoup/Selenium fallback
             except Exception as e:
                 logger.info(f"newspaper4k extraction failed for {url}: {e}")
+                
+                # Track if this was bot protection to check after Selenium
+                bot_protection_failure = "Bot protection" in str(e) or "Server error (403)" in str(e)
+                if bot_protection_failure:
+                    result["_bot_protection_detected"] = True
+                
                 # Try to get any partial result with metadata (including HTTP
                 # status)
                 partial_result = {}
@@ -1323,6 +1329,20 @@ class ContentExtractor:
                 )
                 if metrics:
                     metrics.end_method("selenium", False, str(e), {})
+
+        # If bot protection was detected in newspaper4k and Selenium also failed, raise RateLimitError
+        if result.get("_bot_protection_detected") and self._get_missing_fields(result):
+            logger.warning(
+                f"Bot protection detected and all fallbacks (including Selenium) failed for {url}"
+            )
+            # Clean up the flag
+            result.pop("_bot_protection_detected", None)
+            raise RateLimitError(
+                f"Bot protection on {urlparse(url).netloc} - all extraction methods failed"
+            )
+        
+        # Clean up the flag if extraction succeeded
+        result.pop("_bot_protection_detected", None)
 
         # Apply URL-based publish date fallback when all methods fail
         if not result.get("publish_date"):
@@ -1671,10 +1691,11 @@ class ContentExtractor:
                         else:
                             self._handle_rate_limit_error(domain, response)
 
-                        # Raise exception to stop all fallback attempts
-                        raise RateLimitError(
+                        # Raise regular Exception to allow Selenium fallback
+                        # Only raise RateLimitError if ALL methods fail
+                        raise Exception(
                             f"Bot protection on {domain}: "
-                            f"{protection_type} ({response.status_code})"
+                            f"{protection_type} ({response.status_code}) - will try Selenium"
                         )
                     else:
                         # Generic server error without bot protection indicators
@@ -1683,9 +1704,9 @@ class ContentExtractor:
                             f"- response preview: {response.text[:200] if response.text else 'empty'}"
                         )
                         self._handle_rate_limit_error(domain, response)
-                        # Raise exception to stop all fallback attempts
-                        raise RateLimitError(
-                            f"Server error ({response.status_code}) on {domain}"
+                        # Raise regular Exception to allow Selenium fallback
+                        raise Exception(
+                            f"Server error ({response.status_code}) on {domain} - will try Selenium"
                         )
 
                 # Permanent missing -> cache as dead URL and raise exception
