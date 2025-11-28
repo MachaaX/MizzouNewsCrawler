@@ -158,6 +158,7 @@ spec:
         - "{{inputs.parameters.max-articles}}"
         - --days-back
         - "{{inputs.parameters.days-back}}"
+        - --due-only
         - --log-level
         - "{{inputs.parameters.log-level}}"
       envFrom:

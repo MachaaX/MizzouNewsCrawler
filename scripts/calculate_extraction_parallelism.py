@@ -20,7 +20,7 @@ Examples:
 - 1200 articles: 1200/60 = 20 → 15 workers (maximum)
 
 Usage:
-    python scripts/calculate-extraction-parallelism.py
+    python scripts/calculate_extraction_parallelism.py
     # Outputs just the number: 5
 """
 import sys
