@@ -6,11 +6,15 @@ Scaling formula:
 - Processing time: 4 minutes per article
 - Articles per worker: 240 / 4 = 60 articles in 4 hours
 - Workers needed: backlog / 60
-- Minimum: 3 workers (always maintain baseline capacity)
+- Minimum: 3 workers (accounts for ongoing discovery adding to backlog)
 - Maximum: 15 workers (cost/resource constraint)
 
+The minimum of 3 workers ensures we can process the existing backlog while
+simultaneously handling new articles discovered by the ongoing discovery process.
+This prevents the backlog from growing faster than we can process it.
+
 Examples:
-- 50 articles: 50/60 = 0.83 → 3 workers (minimum)
+- 50 articles: 50/60 = 0.83 → 3 workers (minimum, handles growth)
 - 180 articles: 180/60 = 3 workers
 - 600 articles: 600/60 = 10 workers
 - 1200 articles: 1200/60 = 20 → 15 workers (maximum)
@@ -28,7 +32,7 @@ MINUTES_PER_ARTICLE = 4
 TARGET_COMPLETION_HOURS = 4
 TARGET_COMPLETION_MINUTES = TARGET_COMPLETION_HOURS * 60  # 240 minutes
 ARTICLES_PER_WORKER = TARGET_COMPLETION_MINUTES / MINUTES_PER_ARTICLE  # 60 articles
-MIN_WORKERS = 3
+MIN_WORKERS = 3  # Baseline to handle backlog + ongoing discovery growth
 MAX_WORKERS = 15
 
 
@@ -60,8 +64,12 @@ def calculate_parallelism(backlog: int) -> int:
              workers = backlog / 60
     
     Constraints:
-    - Minimum: 3 workers (always maintain baseline capacity)
+    - Minimum: 3 workers (handles backlog + ongoing discovery growth)
     - Maximum: 15 workers (cost/resource constraint)
+    
+    The minimum ensures we maintain capacity to process both the existing
+    backlog and new articles continuously added by discovery processes,
+    preventing backlog accumulation.
     
     Args:
         backlog: Number of articles awaiting extraction
