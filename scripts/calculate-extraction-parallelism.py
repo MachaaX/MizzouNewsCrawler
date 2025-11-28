@@ -1,20 +1,35 @@
 #!/usr/bin/env python3
 """Calculate optimal extraction parallelism based on backlog size.
 
-Scaling rules:
-- 0-99 articles: 1 worker (minimal backlog)
-- 100-499 articles: 2 workers (default)
-- 500-999 articles: 4 workers (moderate backlog)
-- 1000-2499 articles: 6 workers (large backlog)
-- 2500+ articles: 10 workers (maximum scale)
+Scaling formula:
+- Target: Complete backlog in 4 hours (240 minutes)
+- Processing time: 4 minutes per article
+- Articles per worker: 240 / 4 = 60 articles in 4 hours
+- Workers needed: backlog / 60
+- Minimum: 3 workers (always maintain baseline capacity)
+- Maximum: 15 workers (cost/resource constraint)
+
+Examples:
+- 50 articles: 50/60 = 0.83 → 3 workers (minimum)
+- 180 articles: 180/60 = 3 workers
+- 600 articles: 600/60 = 10 workers
+- 1200 articles: 1200/60 = 20 → 15 workers (maximum)
 
 Usage:
     python scripts/calculate-extraction-parallelism.py
-    # Outputs just the number: 2
+    # Outputs just the number: 5
 """
 import sys
 from src.models.database import DatabaseManager
 from sqlalchemy import text
+
+# Constants
+MINUTES_PER_ARTICLE = 4
+TARGET_COMPLETION_HOURS = 4
+TARGET_COMPLETION_MINUTES = TARGET_COMPLETION_HOURS * 60  # 240 minutes
+ARTICLES_PER_WORKER = TARGET_COMPLETION_MINUTES / MINUTES_PER_ARTICLE  # 60 articles
+MIN_WORKERS = 3
+MAX_WORKERS = 15
 
 
 def get_extraction_backlog() -> int:
@@ -39,17 +54,34 @@ def get_extraction_backlog() -> int:
 
 
 def calculate_parallelism(backlog: int) -> int:
-    """Calculate optimal number of extraction workers based on backlog size."""
-    if backlog < 100:
-        return 1
-    elif backlog < 500:
-        return 2
-    elif backlog < 1000:
-        return 4
-    elif backlog < 2500:
-        return 6
+    """Calculate optimal number of extraction workers based on backlog size.
+    
+    Formula: workers = backlog / (240 minutes / 4 minutes per article)
+             workers = backlog / 60
+    
+    Constraints:
+    - Minimum: 3 workers (always maintain baseline capacity)
+    - Maximum: 15 workers (cost/resource constraint)
+    
+    Args:
+        backlog: Number of articles awaiting extraction
+        
+    Returns:
+        Number of workers needed (between 3 and 15)
+    """
+    if backlog == 0:
+        return MIN_WORKERS
+    
+    # Calculate workers needed to complete backlog in 4 hours
+    workers_needed = int(backlog / ARTICLES_PER_WORKER)
+    
+    # Apply min/max constraints
+    if workers_needed < MIN_WORKERS:
+        return MIN_WORKERS
+    elif workers_needed > MAX_WORKERS:
+        return MAX_WORKERS
     else:
-        return 10
+        return workers_needed
 
 
 def main():
