@@ -104,7 +104,7 @@ def handle_entity_extraction_command(args, extractor=None) -> int:
                 AND NOT EXISTS (
                     SELECT 1 FROM article_entities ae WHERE ae.article_id = a.id
                 )
-                AND a.status != 'error'
+                AND a.status NOT IN ('error', 'paywall', 'wire')
                 """
                 + ("AND cl.source = :source" if source else "")
                 + """
@@ -227,6 +227,13 @@ def handle_entity_extraction_command(args, extractor=None) -> int:
 
                 # Commit all entities for this source batch
                 session.commit()
+
+                # Manually run ANALYZE on article_entities to update query planner stats
+                # This is necessary because we disabled autovacuum analyze for this
+                # write-once, read-many table to avoid daily overhead
+                from sqlalchemy import text
+
+                session.execute(text("ANALYZE article_entities"))
 
                 # Log progress after each source
                 progress_msg = (

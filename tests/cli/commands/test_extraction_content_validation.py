@@ -47,21 +47,35 @@ class TestContentValidationIntegration:
                 pass
 
         def fake_process_batch(*args, **kwargs):
-            return {"processed": 0, "domains_processed": [], "same_domain_consecutive": 0}
+            return {
+                "processed": 0,
+                "domains_processed": [],
+                "same_domain_consecutive": 0,
+            }
 
         def fake_domain_analysis(args, session):
-            return {"unique_domains": 0, "is_single_domain": False, "sample_domains": []}
+            return {
+                "unique_domains": 0,
+                "is_single_domain": False,
+                "sample_domains": [],
+            }
 
         monkeypatch.setattr(extraction, "ContentExtractor", FakeExtractor)
         monkeypatch.setattr(extraction, "BylineCleaner", lambda: object())
-        monkeypatch.setattr(extraction, "BalancedBoundaryContentCleaner", FakeContentCleaner)
+        monkeypatch.setattr(
+            extraction, "BalancedBoundaryContentCleaner", FakeContentCleaner
+        )
         monkeypatch.setattr(
             extraction, "ComprehensiveExtractionTelemetry", lambda: FakeTelemetry()
         )
         monkeypatch.setattr(extraction, "_process_batch", fake_process_batch)
-        monkeypatch.setattr(extraction, "_analyze_dataset_domains", fake_domain_analysis)
+        monkeypatch.setattr(
+            extraction, "_analyze_dataset_domains", fake_domain_analysis
+        )
 
-        args = Namespace(batches=0, limit=1, source=None, dataset=None, exhaust_queue=False)
+        args = Namespace(
+            batches=0, limit=1, source=None, dataset=None, exhaust_queue=False
+        )
         extraction.handle_extraction_command(args)
 
         # Verify content cleaner was instantiated with telemetry disabled
@@ -105,21 +119,35 @@ class TestContentValidationIntegration:
                     "content_cleaner_type": type(content_cleaner).__name__,
                 }
             )
-            return {"processed": 0, "domains_processed": [], "same_domain_consecutive": 0}
+            return {
+                "processed": 0,
+                "domains_processed": [],
+                "same_domain_consecutive": 0,
+            }
 
         def fake_domain_analysis(args, session):
-            return {"unique_domains": 0, "is_single_domain": False, "sample_domains": []}
+            return {
+                "unique_domains": 0,
+                "is_single_domain": False,
+                "sample_domains": [],
+            }
 
         monkeypatch.setattr(extraction, "ContentExtractor", FakeExtractor)
         monkeypatch.setattr(extraction, "BylineCleaner", lambda: object())
-        monkeypatch.setattr(extraction, "BalancedBoundaryContentCleaner", FakeContentCleaner)
+        monkeypatch.setattr(
+            extraction, "BalancedBoundaryContentCleaner", FakeContentCleaner
+        )
         monkeypatch.setattr(
             extraction, "ComprehensiveExtractionTelemetry", lambda: FakeTelemetry()
         )
         monkeypatch.setattr(extraction, "_process_batch", fake_process_batch)
-        monkeypatch.setattr(extraction, "_analyze_dataset_domains", fake_domain_analysis)
+        monkeypatch.setattr(
+            extraction, "_analyze_dataset_domains", fake_domain_analysis
+        )
 
-        args = Namespace(batches=1, limit=1, source=None, dataset=None, exhaust_queue=False)
+        args = Namespace(
+            batches=1, limit=1, source=None, dataset=None, exhaust_queue=False
+        )
         extraction.handle_extraction_command(args)
 
         # Verify content_cleaner was passed to process_batch
@@ -219,7 +247,11 @@ class TestContentValidationLogic:
         monkeypatch.setattr(extraction, "BylineCleaner", FakeBylineCleaner)
         monkeypatch.setattr(extraction, "ExtractionMetrics", FakeMetrics)
         monkeypatch.setattr(extraction, "calculate_content_hash", lambda *a: "hash123")
-        monkeypatch.setattr(extraction, "ContentTypeDetector", lambda **kw: Mock(detect=lambda **k: None))
+        monkeypatch.setattr(
+            extraction,
+            "ContentTypeDetector",
+            lambda **kw: Mock(detect=lambda **k: None),
+        )
 
         db = FakeDBManager()
         args = Namespace(dump_sql=False)
@@ -245,7 +277,9 @@ class TestContentValidationLogic:
         assert len(db.session.insert_calls) == 1
         assert result["processed"] == 1
 
-    def test_article_with_insufficient_content_after_cleaning_skipped(self, monkeypatch):
+    def test_article_with_insufficient_content_after_cleaning_skipped(
+        self, monkeypatch
+    ):
         """Test that articles with <150 chars non-boilerplate are skipped."""
         rows = [
             (
@@ -340,7 +374,11 @@ class TestContentValidationLogic:
         monkeypatch.setattr(extraction, "BylineCleaner", FakeBylineCleaner)
         monkeypatch.setattr(extraction, "ExtractionMetrics", FakeMetrics)
         monkeypatch.setattr(extraction, "calculate_content_hash", lambda *a: "hash123")
-        monkeypatch.setattr(extraction, "ContentTypeDetector", lambda **kw: Mock(detect=lambda **k: None))
+        monkeypatch.setattr(
+            extraction,
+            "ContentTypeDetector",
+            lambda **kw: Mock(detect=lambda **k: None),
+        )
 
         db = FakeDBManager()
         args = Namespace(dump_sql=False)
@@ -453,7 +491,11 @@ class TestContentValidationLogic:
         monkeypatch.setattr(extraction, "BylineCleaner", FakeBylineCleaner)
         monkeypatch.setattr(extraction, "ExtractionMetrics", FakeMetrics)
         monkeypatch.setattr(extraction, "calculate_content_hash", lambda *a: "hash123")
-        monkeypatch.setattr(extraction, "ContentTypeDetector", lambda **kw: Mock(detect=lambda **k: None))
+        monkeypatch.setattr(
+            extraction,
+            "ContentTypeDetector",
+            lambda **kw: Mock(detect=lambda **k: None),
+        )
 
         db = FakeDBManager()
         args = Namespace(dump_sql=False)
@@ -462,7 +504,7 @@ class TestContentValidationLogic:
         content_cleaner = FakeContentCleaner()
         telemetry = FakeTelemetry()
 
-        result = extraction._process_batch(
+        extraction._process_batch(
             args,
             extractor,
             byline_cleaner,
@@ -490,15 +532,16 @@ class TestContentValidationWithPersistentPatterns:
         self, cloud_sql_session
     ):
         """Test that persistent boilerplate patterns are used for content validation.
-        
+
         This integration test verifies:
         1. BalancedBoundaryContentCleaner queries persistent_boilerplate_patterns
         2. Domain-specific patterns are applied during content validation
         3. Articles with insufficient non-boilerplate content are skipped
         """
+        from sqlalchemy import text
+
         from src.models import CandidateLink, Source
         from src.utils.content_cleaner_balanced import BalancedBoundaryContentCleaner
-        from sqlalchemy import text
 
         # Create test source
         source = Source(
@@ -569,6 +612,6 @@ class TestContentValidationWithPersistentPatterns:
         assert "Get up-to-the-minute news" not in stripped_content
         # Verify remaining content is less than MIN_CONTENT_LENGTH (150)
         assert len(stripped_content.strip()) < 150
-        
+
         # Verify pattern was matched
         assert metadata.get("persistent_removals", 0) > 0

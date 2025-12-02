@@ -1185,12 +1185,14 @@ class ContentExtractor:
                 raise  # Re-raise to prevent BeautifulSoup/Selenium fallback
             except Exception as e:
                 logger.info(f"newspaper4k extraction failed for {url}: {e}")
-                
+
                 # Track if this was bot protection to check after Selenium
-                bot_protection_failure = "Bot protection" in str(e) or "Server error (403)" in str(e)
+                bot_protection_failure = "Bot protection" in str(
+                    e
+                ) or "Server error (403)" in str(e)
                 if bot_protection_failure:
                     result["_bot_protection_detected"] = True
-                
+
                 # Try to get any partial result with metadata (including HTTP
                 # status)
                 partial_result = {}
@@ -1340,7 +1342,7 @@ class ContentExtractor:
             raise RateLimitError(
                 f"Bot protection on {urlparse(url).netloc} - all extraction methods failed"
             )
-        
+
         # Clean up the flag if extraction succeeded
         result.pop("_bot_protection_detected", None)
 

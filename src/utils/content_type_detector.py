@@ -415,41 +415,41 @@ class ContentTypeDetector:
 
     def _strip_boilerplate_for_wire_detection(self, content: str) -> str:
         """Strip common navigation/menu boilerplate that appears before article content.
-        
+
         Many news sites include extensive navigation menus, section links, and other
         boilerplate before the actual article text. This causes wire service bylines
         and datelines to appear after the first 300 characters.
-        
+
         This method removes obvious patterns to reveal the actual article start.
         """
         if not content or len(content) < 200:
             return content
-            
+
         # Look for common article start indicators that appear after boilerplate
         # These mark where the actual article content begins
         article_start_indicators = [
             # Byline patterns
-            (r'\bBy [A-Z][a-z]+ [A-Z]', 'byline'),  # "By John Smith"
-            (r'\bBy The Associated Press\b', 'byline'),
-            (r'\b[A-Z]{2,},', 'dateline'),  # "WASHINGTON," or "ALBUQUERQUE, N.M."
+            (r"\bBy [A-Z][a-z]+ [A-Z]", "byline"),  # "By John Smith"
+            (r"\bBy The Associated Press\b", "byline"),
+            (r"\b[A-Z]{2,},", "dateline"),  # "WASHINGTON," or "ALBUQUERQUE, N.M."
             # Story titles that precede bylines (less reliable, use as fallback)
-            (r'\n[A-Z][a-z]{3,}.*?\n', 'title'),
+            (r"\n[A-Z][a-z]{3,}.*?\n", "title"),
         ]
-        
+
         earliest_match = None
         earliest_pos = len(content)
-        
+
         for pattern, indicator_type in article_start_indicators:
             match = re.search(pattern, content)
             if match and match.start() < earliest_pos and match.start() > 100:
                 # Article indicators should appear after at least 100 chars (skip false positives in menus)
                 earliest_pos = match.start()
                 earliest_match = match
-                
+
         if earliest_match:
             # Strip everything before the article start indicator
             return content[earliest_pos:].lstrip()
-            
+
         # If no clear article start found, just return original content
         # (300 char window will handle it)
         return content
