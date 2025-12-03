@@ -319,7 +319,14 @@ def test_process_batch_success_path(monkeypatch):
     host_403_tracker = {}
     extractor = FakeExtractor()
     content_cleaner = type(
-        "C", (), {"process_single_article": lambda *a, **k: ("", {})}
+        "C",
+        (),
+        {
+            "process_single_article": lambda *a, **k: (
+                "Cleaned content about local news. " * 10,
+                {},
+            )
+        },
     )()
     telemetry = FakeTelemetry()
 
@@ -387,7 +394,7 @@ def test_run_post_extraction_cleaning_updates_status(monkeypatch):
         def analyze_domain(self, domain):
             cleaner_calls.append(("analyze", domain))
 
-        def process_single_article(self, *, text, domain, article_id):
+        def process_single_article(self, text, domain, article_id=None, **kwargs):
             cleaner_calls.append(("clean", domain, article_id, text))
             return text + "!", {"chars_removed": 1}
 

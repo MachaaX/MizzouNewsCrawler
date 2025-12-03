@@ -89,7 +89,7 @@ def _setup_extraction_test_environment(
             self,
             text: str,
             domain: str,
-            article_id: str,
+            article_id=None,
             **kwargs,
         ) -> tuple[str, dict[str, Any]]:
             cleaner_calls.append(f"cleaned:{article_id}")

@@ -557,7 +557,7 @@ def test_county_pipeline_golden_path(
             self,
             text: str,
             domain: str,
-            article_id: str,
+            article_id=None,
             **_extra,
         ) -> tuple[str, dict]:
             cleaner_calls.append(f"cleaned:{article_id}")
