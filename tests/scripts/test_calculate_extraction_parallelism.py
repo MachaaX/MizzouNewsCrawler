@@ -6,6 +6,7 @@ for determining extraction worker parallelism based on backlog size.
 
 import pytest
 
+import scripts.calculate_extraction_parallelism as calc_script
 from scripts.calculate_extraction_parallelism import (
     ARTICLES_PER_WORKER,
     MAX_WORKERS,
@@ -126,7 +127,7 @@ class TestGetExtractionBacklog:
         backlog = get_extraction_backlog()
         assert backlog == 0
 
-    def test_article_status_not_extracted_counts(self, cloud_sql_session):
+    def test_article_status_not_extracted_counts(self, cloud_sql_session, monkeypatch):
         """Candidates with 'article' status but not extracted should count."""
         # Create 3 candidate_links with status='article'
         candidates = [
@@ -141,10 +142,23 @@ class TestGetExtractionBacklog:
             cloud_sql_session.add(c)
         cloud_sql_session.commit()
 
+        # Mock DatabaseManager to use test session
+        class FakeDBManager:
+            def get_session(self):
+                from contextlib import contextmanager
+
+                @contextmanager
+                def session():
+                    yield cloud_sql_session
+
+                return session()
+
+        monkeypatch.setattr(calc_script, "DatabaseManager", lambda: FakeDBManager())
+
         backlog = get_extraction_backlog()
         assert backlog == 3
 
-    def test_extracted_articles_excluded(self, cloud_sql_session):
+    def test_extracted_articles_excluded(self, cloud_sql_session, monkeypatch):
         """Candidates with status='article' but already extracted should not count."""
         # Create 5 candidate_links with status='article'
         candidates = [
@@ -178,12 +192,41 @@ class TestGetExtractionBacklog:
         )
         cloud_sql_session.commit()
 
+        # Mock DatabaseManager to use test session
+        class FakeDBManager:
+            def get_session(self):
+                from contextlib import contextmanager
+
+                @contextmanager
+                def session():
+                    yield cloud_sql_session
+
+                return session()
+
+        monkeypatch.setattr(calc_script, "DatabaseManager", lambda: FakeDBManager())
+
         # Should count 3 remaining (5 total - 2 extracted)
         backlog = get_extraction_backlog()
         assert backlog == 3
 
-    def test_mixed_statuses_only_unextracted_articles_count(self, cloud_sql_session):
+    def test_mixed_statuses_only_unextracted_articles_count(
+        self, cloud_sql_session, monkeypatch
+    ):
         """Complex scenario with mixed statuses and extraction states."""
+
+        # Mock DatabaseManager to use test session
+        class FakeDBManager:
+            def get_session(self):
+                from contextlib import contextmanager
+
+                @contextmanager
+                def session():
+                    yield cloud_sql_session
+
+                return session()
+
+        monkeypatch.setattr(calc_script, "DatabaseManager", lambda: FakeDBManager())
+
         # 2 candidates with status='new' (should not count)
         cloud_sql_session.add(
             CandidateLink(
@@ -241,8 +284,22 @@ class TestGetExtractionBacklog:
         backlog = get_extraction_backlog()
         assert backlog == 4
 
-    def test_large_backlog(self, cloud_sql_session):
+    def test_large_backlog(self, cloud_sql_session, monkeypatch):
         """Test with larger backlog to verify scalability."""
+
+        # Mock DatabaseManager to use test session
+        class FakeDBManager:
+            def get_session(self):
+                from contextlib import contextmanager
+
+                @contextmanager
+                def session():
+                    yield cloud_sql_session
+
+                return session()
+
+        monkeypatch.setattr(calc_script, "DatabaseManager", lambda: FakeDBManager())
+
         # Create 150 candidates with status='article'
         candidates = [
             CandidateLink(
@@ -265,8 +322,22 @@ class TestGetExtractionBacklog:
 class TestMainFunction:
     """Integration tests for main() function (end-to-end with database)."""
 
-    def test_main_outputs_worker_count(self, cloud_sql_session, capsys):
+    def test_main_outputs_worker_count(self, cloud_sql_session, capsys, monkeypatch):
         """main() should output worker count to stdout and log to stderr."""
+
+        # Mock DatabaseManager to use test session
+        class FakeDBManager:
+            def get_session(self):
+                from contextlib import contextmanager
+
+                @contextmanager
+                def session():
+                    yield cloud_sql_session
+
+                return session()
+
+        monkeypatch.setattr(calc_script, "DatabaseManager", lambda: FakeDBManager())
+
         # Create backlog of 300 articles
         candidates = [
             CandidateLink(
@@ -305,8 +376,24 @@ class TestMainFunction:
         assert "Backlog: 0 articles" in captured.err
         assert f"{MIN_WORKERS} workers" in captured.err
 
-    def test_main_large_backlog_caps_at_maximum(self, cloud_sql_session, capsys):
+    def test_main_large_backlog_caps_at_maximum(
+        self, cloud_sql_session, capsys, monkeypatch
+    ):
         """main() with large backlog should cap at MAX_WORKERS."""
+
+        # Mock DatabaseManager to use test session
+        class FakeDBManager:
+            def get_session(self):
+                from contextlib import contextmanager
+
+                @contextmanager
+                def session():
+                    yield cloud_sql_session
+
+                return session()
+
+        monkeypatch.setattr(calc_script, "DatabaseManager", lambda: FakeDBManager())
+
         # Create backlog of 2000 articles (would calculate to 33 workers)
         candidates = [
             CandidateLink(

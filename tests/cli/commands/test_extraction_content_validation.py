@@ -553,6 +553,7 @@ class TestContentValidationWithPersistentPatterns:
         source = Source(
             id="source-test-boilerplate",
             host="testboilerplate.com",
+            host_norm="testboilerplate.com",
             canonical_name="Test Boilerplate News",
             status="active",
         )
