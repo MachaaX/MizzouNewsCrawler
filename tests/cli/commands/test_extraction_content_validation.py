@@ -650,5 +650,3 @@ class TestContentValidationWithPersistentPatterns:
 
         # Verify pattern lookup was called
         mock_telemetry.get_persistent_patterns.assert_called_with("testboilerplate.com")
-            "testboilerplate.com"
-        )
