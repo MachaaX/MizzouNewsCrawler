@@ -575,13 +575,11 @@ class TestContentValidationWithPersistentPatterns:
             text(
                 """
                 INSERT INTO persistent_boilerplate_patterns (
-                    id, domain, pattern_type, text_content, text_hash,
-                    confidence_score, occurrences_total, is_active,
-                    is_ml_training_eligible, removal_reason
+                    id, domain, pattern_type, pattern_text, pattern_text_hash,
+                    occurrence_count, is_active
                 ) VALUES (
-                    :id, :domain, :pattern_type, :text_content, :text_hash,
-                    :confidence_score, :occurrences, :is_active,
-                    :is_ml_eligible, :removal_reason
+                    :id, :domain, :pattern_type, :pattern_text, :pattern_text_hash,
+                    :occurrences, :is_active
                 )
                 """
             ),
@@ -589,13 +587,10 @@ class TestContentValidationWithPersistentPatterns:
                 "id": "pattern-login-form",
                 "domain": "testboilerplate.com",
                 "pattern_type": "subscription",
-                "text_content": "Get up-to-the-minute news sent straight to your device",
-                "text_hash": "hash-login-form",
-                "confidence_score": 0.95,
+                "pattern_text": "Get up-to-the-minute news sent straight to your device",
+                "pattern_text_hash": 123456789,
                 "occurrences": 10,
                 "is_active": True,
-                "is_ml_eligible": True,
-                "removal_reason": "Persistent subscription pattern",
             },
         )
         cloud_sql_session.commit()

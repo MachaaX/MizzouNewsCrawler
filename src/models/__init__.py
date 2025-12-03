@@ -542,7 +542,7 @@ class Source(Base):
         String,
         index=True,
         unique=True,
-        nullable=True,
+        nullable=False,
     )
     canonical_name = Column(String, index=True)
     city = Column(String, index=True)
