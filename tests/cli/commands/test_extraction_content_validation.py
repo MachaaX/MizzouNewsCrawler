@@ -617,14 +617,13 @@ class TestContentValidationWithPersistentPatterns:
             }
         ]
 
-        with patch.object(BalancedBoundaryContentCleaner, "telemetry", mock_telemetry):
-            cleaner = BalancedBoundaryContentCleaner(enable_telemetry=True)
-            cleaner.telemetry = mock_telemetry
-            stripped_content, metadata = cleaner.process_single_article(
-                text=content_text,
-                domain="testboilerplate.com",
-                dry_run=True,
-            )
+        cleaner = BalancedBoundaryContentCleaner(enable_telemetry=True)
+        cleaner.telemetry = mock_telemetry
+        stripped_content, metadata = cleaner.process_single_article(
+            text=content_text,
+            domain="testboilerplate.com",
+            dry_run=True,
+        )
 
         # Verify boilerplate was removed
         assert "Get up-to-the-minute news" not in stripped_content
