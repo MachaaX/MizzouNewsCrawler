@@ -604,7 +604,7 @@ class TestContentValidationWithPersistentPatterns:
 
         # Use BalancedBoundaryContentCleaner to strip boilerplate
         # Mock telemetry to return our persistent pattern
-        from unittest.mock import Mock, patch
+        from unittest.mock import Mock
 
         # Pattern must be >= 150 chars to bypass length filter in _remove_persistent_patterns
         boilerplate_pattern = (
@@ -630,13 +630,13 @@ class TestContentValidationWithPersistentPatterns:
             return_value=mock_telemetry,
         ):
             cleaner = BalancedBoundaryContentCleaner(enable_telemetry=True)
-            
+
             # Test content with the boilerplate pattern
             content_text = (
                 boilerplate_pattern + "\n"
                 "This is actual article content but it's too short"
             )
-            
+
             stripped_content, metadata = cleaner.process_single_article(
                 text=content_text,
                 domain="testboilerplate.com",
