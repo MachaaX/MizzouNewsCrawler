@@ -140,7 +140,8 @@ def test_successful_extraction_saves_to_articles_table():
         env.session.execute.side_effect = execute_side_effect
         env.extractor.extract_content.return_value = {
             "title": "Test Article Title",
-            "content": "Test article content about parks and county services. " * 10,  # >150 chars
+            "content": "Test article content about parks and county services. "
+            * 10,  # >150 chars
             "author": "Test Author",
             "publish_date": "2025-09-20T10:00:00",
             "metadata": {"source": "test"},
@@ -199,7 +200,8 @@ def test_opinion_detection_sets_status():
         env.session.execute.side_effect = execute_side_effect
         env.extractor.extract_content.return_value = {
             "title": "Opinion: Why the parks matter",
-            "content": "Opinion content about parks and their importance. " * 10,  # >150 chars
+            "content": "Opinion content about parks and their importance. "
+            * 10,  # >150 chars
             "author": "Columnist",
             "metadata": {},
         }

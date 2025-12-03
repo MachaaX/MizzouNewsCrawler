@@ -1163,7 +1163,7 @@ def _process_batch(
                         not stripped_content
                         or len(stripped_content.strip()) < MIN_CONTENT_LENGTH
                     )
-                    
+
                     # Only mark as paywall if BOTH conditions are met
                     if is_insufficient_content and has_paywall_patterns:
                         non_boilerplate_len = (
@@ -1186,7 +1186,9 @@ def _process_batch(
                             f"({non_boilerplate_len} chars non-boilerplate < {MIN_CONTENT_LENGTH}): {url}"
                         )
                         session.execute(
-                            text("UPDATE candidate_links SET status = :status, error_message = :error WHERE id = :id"),
+                            text(
+                                "UPDATE candidate_links SET status = :status, error_message = :error WHERE id = :id"
+                            ),
                             {
                                 "id": str(url_id),
                                 "status": "extracted",
