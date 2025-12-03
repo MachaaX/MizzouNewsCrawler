@@ -53,6 +53,7 @@ def test_handle_extraction_command_success(monkeypatch):
         args,
         extractor,
         byline_cleaner,
+        content_cleaner,
         telemetry,
         per_batch,
         batch_num,
@@ -81,6 +82,13 @@ def test_handle_extraction_command_success(monkeypatch):
 
     monkeypatch.setattr(extraction, "ContentExtractor", FakeExtractor)
     monkeypatch.setattr(extraction, "BylineCleaner", lambda: object())
+    monkeypatch.setattr(
+        extraction,
+        "BalancedBoundaryContentCleaner",
+        lambda **kw: type(
+            "C", (), {"process_single_article": lambda *a, **k: ("", {})}
+        ),
+    )
     monkeypatch.setattr(
         extraction,
         "ComprehensiveExtractionTelemetry",
@@ -310,12 +318,23 @@ def test_process_batch_success_path(monkeypatch):
     domains_for_cleaning = defaultdict(list)
     host_403_tracker = {}
     extractor = FakeExtractor()
+    content_cleaner = type(
+        "C",
+        (),
+        {
+            "process_single_article": lambda *a, **k: (
+                "Cleaned content about local news. " * 10,
+                {},
+            )
+        },
+    )()
     telemetry = FakeTelemetry()
 
     result = extraction._process_batch(
         Namespace(limit=1, source=None),
         extractor,
         FakeByline(),
+        content_cleaner,
         telemetry,
         1,
         1,
@@ -353,6 +372,7 @@ def test_process_batch_rate_limited(monkeypatch):
         Namespace(limit=1, source=None),
         BlockingExtractor(),
         object(),
+        type("C", (), {"process_single_article": lambda *a, **k: ("", {})}),
         object(),
         1,
         1,
@@ -374,7 +394,7 @@ def test_run_post_extraction_cleaning_updates_status(monkeypatch):
         def analyze_domain(self, domain):
             cleaner_calls.append(("analyze", domain))
 
-        def process_single_article(self, *, text, domain, article_id):
+        def process_single_article(self, text, domain, article_id=None, **kwargs):
             cleaner_calls.append(("clean", domain, article_id, text))
             return text + "!", {"chars_removed": 1}
 

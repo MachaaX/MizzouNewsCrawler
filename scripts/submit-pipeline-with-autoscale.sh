@@ -8,7 +8,7 @@
 set -euo pipefail
 
 # Calculate optimal parallelism
-PARALLELISM=$(python scripts/calculate-extraction-parallelism.py)
+PARALLELISM=$(python scripts/calculate_extraction_parallelism.py)
 
 echo "📊 Submitting workflow with $PARALLELISM extraction workers"
 

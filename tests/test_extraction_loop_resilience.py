@@ -104,7 +104,8 @@ def test_extraction_loop_resilience(
         Exception("Simulated Extraction Failure"),
         {
             "title": "Success Article",
-            "text": "Some content",
+            "content": "Some content about local news and county services. "
+            * 10,  # >150 chars
             "author": "Test Author",
             "publish_date": "2023-01-01",
         },

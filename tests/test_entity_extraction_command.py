@@ -131,7 +131,8 @@ class TestEntityExtractionCommand:
 
         # Verify
         assert result == 0
-        mock_session.execute.assert_called_once()
+        # Should call execute twice: once for query, once for ANALYZE
+        assert mock_session.execute.call_count == 2
 
         # Verify entity extraction pipeline was called
         extractor = mock_entity_extractor.return_value

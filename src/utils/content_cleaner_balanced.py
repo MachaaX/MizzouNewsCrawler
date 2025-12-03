@@ -269,9 +269,9 @@ class BalancedBoundaryContentCleaner:
         db = self._connect_to_db()
         with db.get_session() as session:
             query = """
-            SELECT text_content, pattern_type, confidence_score
+            SELECT pattern_text, pattern_type, boundary_score
             FROM persistent_boilerplate_patterns
-            WHERE domain = :domain
+            WHERE domain = :domain AND is_active = TRUE
             """
             result = safe_session_execute(session, sql_text(query), {"domain": domain})
 

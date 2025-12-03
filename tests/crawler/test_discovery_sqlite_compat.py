@@ -174,12 +174,12 @@ def test_get_sources_query_works_on_sqlite(sqlite_db: str):
                 text(
                     """
                 INSERT INTO sources (
-                    id, canonical_name, host, city, county,
+                    id, canonical_name, host, host_norm, city, county,
                     rss_consecutive_failures, rss_transient_failures,
                     no_effective_methods_consecutive
                 )
                 VALUES (
-                    :id, :name, :host, :city, :county,
+                    :id, :name, :host, :host_norm, :city, :county,
                     :rcf, :rtf, :nemc
                 )
                 """
@@ -188,6 +188,7 @@ def test_get_sources_query_works_on_sqlite(sqlite_db: str):
                     "id": source_id,
                     "name": f"Test Source {i+1}",
                     "host": f"test{i+1}.example.com",
+                    "host_norm": f"test{i+1}.example.com",
                     "city": "TestCity",
                     "county": "TestCounty",
                     "rcf": 0,
@@ -269,12 +270,12 @@ def test_dataset_filtering_works_on_sqlite(sqlite_db: str):
             text(
                 """
             INSERT INTO sources (
-                id, canonical_name, host,
+                id, canonical_name, host, host_norm,
                 rss_consecutive_failures, rss_transient_failures,
                 no_effective_methods_consecutive
             )
             VALUES (
-                :id, :name, :host, :rcf, :rtf, :nemc
+                :id, :name, :host, :host_norm, :rcf, :rtf, :nemc
             )
             """
             ),
@@ -282,6 +283,7 @@ def test_dataset_filtering_works_on_sqlite(sqlite_db: str):
                 "id": source1_id,
                 "name": "Source 1",
                 "host": "source1.com",
+                "host_norm": "source1.com",
                 "rcf": 0,
                 "rtf": "[]",
                 "nemc": 0,
@@ -306,12 +308,12 @@ def test_dataset_filtering_works_on_sqlite(sqlite_db: str):
             text(
                 """
             INSERT INTO sources (
-                id, canonical_name, host,
+                id, canonical_name, host, host_norm,
                 rss_consecutive_failures, rss_transient_failures,
                 no_effective_methods_consecutive
             )
             VALUES (
-                :id, :name, :host, :rcf, :rtf, :nemc
+                :id, :name, :host, :host_norm, :rcf, :rtf, :nemc
             )
             """
             ),
@@ -319,6 +321,7 @@ def test_dataset_filtering_works_on_sqlite(sqlite_db: str):
                 "id": source2_id,
                 "name": "Source 2",
                 "host": "source2.com",
+                "host_norm": "source2.com",
                 "rcf": 0,
                 "rtf": "[]",
                 "nemc": 0,
@@ -402,12 +405,12 @@ def test_due_only_filtering_on_sqlite(sqlite_db: str):
             text(
                 """
             INSERT INTO sources (
-                id, canonical_name, host, metadata,
+                id, canonical_name, host, host_norm, metadata,
                 rss_consecutive_failures, rss_transient_failures,
                 no_effective_methods_consecutive
             )
             VALUES (
-                :id, :name, :host, :metadata,
+                :id, :name, :host, :host_norm, :metadata,
                 :rcf, :rtf, :nemc
             )
             """
@@ -416,6 +419,7 @@ def test_due_only_filtering_on_sqlite(sqlite_db: str):
                 "id": source_id,
                 "name": "Test Source",
                 "host": "test.com",
+                "host_norm": "test.com",
                 "metadata": json.dumps(metadata),
                 "rcf": 0,
                 "rtf": "[]",
@@ -453,12 +457,12 @@ def test_database_dialect_detection(sqlite_db: str):
             text(
                 """
             INSERT INTO sources (
-                id, canonical_name, host,
+                id, canonical_name, host, host_norm,
                 rss_consecutive_failures, rss_transient_failures,
                 no_effective_methods_consecutive
             )
             VALUES (
-                :id, :name, :host, :rcf, :rtf, :nemc
+                :id, :name, :host, :host_norm, :rcf, :rtf, :nemc
             )
             """
             ),
@@ -466,6 +470,7 @@ def test_database_dialect_detection(sqlite_db: str):
                 "id": source_id,
                 "name": "Test",
                 "host": "test.com",
+                "host_norm": "test.com",
                 "rcf": 0,
                 "rtf": "[]",
                 "nemc": 0,

@@ -555,6 +555,9 @@ def handle_extraction_command(args) -> int:
 
     extractor = extractor_cls()
     byline_cleaner = BylineCleaner()
+    content_cleaner = BalancedBoundaryContentCleaner(
+        enable_telemetry=False  # Don't need telemetry for validation-only cleaning
+    )
     telemetry = ComprehensiveExtractionTelemetry()
 
     # Track hosts that return 403 responses within this run
@@ -597,6 +600,7 @@ def handle_extraction_command(args) -> int:
                 args,
                 extractor,
                 byline_cleaner,
+                content_cleaner,
                 telemetry,
                 batch_size,
                 batch_num,
@@ -819,6 +823,7 @@ def _process_batch(
     args,
     extractor,
     byline_cleaner,
+    content_cleaner,
     telemetry,
     per_batch,
     batch_num,
@@ -826,6 +831,11 @@ def _process_batch(
     domains_for_cleaning,
     db=None,
 ):
+    """Process a single extraction batch with domain-aware rate limiting.
+
+    Note: content_cleaner can be any object with a process_single_article(text, domain, dry_run=False)
+    method that returns (cleaned_text, metadata).
+    """
     """Process a single extraction batch with domain-aware rate limiting."""
     if db is None:
         db = DatabaseManager()
@@ -1110,9 +1120,84 @@ def _process_batch(
 
                     now = datetime.utcnow()
                     content_text = content.get("content", "")
-                    text_hash = (
-                        calculate_content_hash(content_text) if content_text else None
+
+                    # Validate content length - mark paywall articles
+                    # Articles with <150 chars non-boilerplate: status='paywall'
+                    # Tracked in DB but excluded from ML/BigQuery:
+                    # - entity_extraction.py: skips paywall/wire/error
+                    # - analysis.py: EXCLUDED_STATUSES includes paywall
+                    # - BigQuery: only exports status='labeled'
+                    # Uses database boilerplate patterns to strip noise
+                    MIN_CONTENT_LENGTH = 150
+                    cleaning_metadata = {}
+                    if content_text:
+                        from urllib.parse import urlparse
+
+                        domain = urlparse(url).netloc
+                        # Clean content using persistent patterns from database
+                        # Note: Some test implementations may not support dry_run parameter
+                        try:
+                            stripped_content, cleaning_metadata = (
+                                content_cleaner.process_single_article(
+                                    text=content_text,
+                                    domain=domain,
+                                    dry_run=True,  # Don't modify the original content
+                                )
+                            )
+                        except TypeError:
+                            # Fallback for test mocks without dry_run parameter
+                            stripped_content, cleaning_metadata = (
+                                content_cleaner.process_single_article(
+                                    content_text, domain
+                                )
+                            )
+                    else:
+                        stripped_content = ""
+
+                    # Check if content is insufficient AND has paywall indicators
+                    has_paywall_patterns = any(
+                        pattern in cleaning_metadata.get("patterns_matched", [])
+                        for pattern in ["subscription", "paywall"]
                     )
+                    is_insufficient_content = (
+                        not stripped_content
+                        or len(stripped_content.strip()) < MIN_CONTENT_LENGTH
+                    )
+
+                    # Only mark as paywall if BOTH conditions are met
+                    if is_insufficient_content and has_paywall_patterns:
+                        non_boilerplate_len = (
+                            len(stripped_content.strip()) if stripped_content else 0
+                        )
+                        logger.warning(
+                            f"Article has insufficient content with paywall indicators - marking "
+                            f"as paywall ({non_boilerplate_len} chars "
+                            f"non-boilerplate < {MIN_CONTENT_LENGTH}): {url}"
+                        )
+                        # Set status='paywall' to save but skip ML
+                        article_status = "paywall"
+                    elif is_insufficient_content:
+                        # Short content but no paywall indicators - skip entirely
+                        non_boilerplate_len = (
+                            len(stripped_content.strip()) if stripped_content else 0
+                        )
+                        logger.warning(
+                            f"Article has insufficient content without paywall indicators - skipping "
+                            f"({non_boilerplate_len} chars non-boilerplate < {MIN_CONTENT_LENGTH}): {url}"
+                        )
+                        session.execute(
+                            text(
+                                "UPDATE candidate_links SET status = :status, error_message = :error WHERE id = :id"
+                            ),
+                            {
+                                "id": str(url_id),
+                                "status": "extracted",
+                                "error": "Insufficient content (no paywall detected)",
+                            },
+                        )
+                        continue  # Skip to next article
+
+                    text_hash = calculate_content_hash(content_text)
 
                     metrics.set_content_type_detection(detection_payload)
                     metrics.finalize(content or {})

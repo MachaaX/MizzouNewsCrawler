@@ -127,6 +127,9 @@ def test_pause_on_two_403s(db_manager):
     # Create fake extractor that sets metrics to 403 and raises
     fake_extractor = FakeExtractor()
     fake_byline = None
+    fake_content_cleaner = type(
+        "C", (), {"process_single_article": lambda *a, **k: ("", {})}
+    )()
     fake_telemetry = type("T", (), {"record_extraction": lambda *a, **k: None})()
 
     # Call _process_batch twice, first will record one 403, second will hit
@@ -142,6 +145,7 @@ def test_pause_on_two_403s(db_manager):
         args,
         fake_extractor,
         fake_byline,
+        fake_content_cleaner,
         fake_telemetry,
         per_batch=10,
         batch_num=1,
@@ -149,11 +153,12 @@ def test_pause_on_two_403s(db_manager):
         domains_for_cleaning=domains_for_cleaning,
     )
 
-    # Second run: this should trigger the pause update
+    # Second run - should pause
     extraction._process_batch(
         args,
         fake_extractor,
         fake_byline,
+        fake_content_cleaner,
         fake_telemetry,
         per_batch=10,
         batch_num=2,
@@ -179,6 +184,7 @@ def test_pause_on_two_403s(db_manager):
         args,
         fake_extractor,
         fake_byline,
+        fake_content_cleaner,
         fake_telemetry,
         per_batch=10,
         batch_num=3,

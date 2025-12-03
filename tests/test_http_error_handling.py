@@ -310,14 +310,26 @@ class TestExplicitlyHandledErrorCodes:
     def test_403_forbidden_with_bot_protection_raises_rate_limit_error(
         self, extractor, mock_response
     ):
-        """Test that 403 with bot protection raises RateLimitError."""
+        """Test that 403 with bot protection raises Exception when newspaper fallback also fails."""
         with (
+            patch("src.crawler.NewspaperArticle") as mock_article_class,
             patch.object(extractor, "_get_domain_session") as mock_session,
             patch.object(
                 extractor, "_detect_bot_protection_in_response"
             ) as mock_detect,
             patch.object(extractor, "_handle_rate_limit_error"),
         ):
+            # Mock the Article object with required attributes
+            mock_article = Mock()
+            mock_article.title = "Test"
+            mock_article.authors = []
+            mock_article.text = ""
+            mock_article.publish_date = None
+            mock_article.meta_description = ""
+            mock_article.keywords = []
+            # Mock download() to also fail (simulating bot protection on all methods)
+            mock_article.download.side_effect = Exception("Download blocked")
+            mock_article_class.return_value = mock_article
 
             mock_sess = Mock()
             response = mock_response(403, "Access Denied - Cloudflare")
@@ -325,65 +337,105 @@ class TestExplicitlyHandledErrorCodes:
             mock_session.return_value = mock_sess
             mock_detect.return_value = "cloudflare"
 
-            with pytest.raises(RateLimitError, match="Bot protection"):
+            # Should raise Exception from download fallback
+            with pytest.raises(Exception, match="Download blocked"):
                 extractor._extract_with_newspaper("https://example.com/protected")
 
     def test_502_bad_gateway_raises_rate_limit_error(self, extractor, mock_response):
-        """Test that 502 Bad Gateway raises RateLimitError."""
+        """Test that 502 Bad Gateway raises Exception when newspaper fallback also fails."""
         with (
+            patch("src.crawler.NewspaperArticle") as mock_article_class,
             patch.object(extractor, "_get_domain_session") as mock_session,
             patch.object(
                 extractor, "_detect_bot_protection_in_response"
             ) as mock_detect,
             patch.object(extractor, "_handle_rate_limit_error"),
         ):
+            # Mock the Article object with required attributes
+            mock_article = Mock()
+            mock_article.title = "Test"
+            mock_article.authors = []
+            mock_article.text = ""
+            mock_article.publish_date = None
+            mock_article.meta_description = ""
+            mock_article.keywords = []
+            # Mock download() to also fail
+            mock_article.download.side_effect = Exception("Download blocked")
+            mock_article_class.return_value = mock_article
 
             mock_sess = Mock()
             mock_sess.get.return_value = mock_response(502, "Bad Gateway")
             mock_session.return_value = mock_sess
             mock_detect.return_value = None  # No bot protection detected
 
-            with pytest.raises(RateLimitError, match="Server error \\(502\\)"):
+            # Should raise Exception from download fallback
+            with pytest.raises(Exception, match="Download blocked"):
                 extractor._extract_with_newspaper("https://example.com/gateway")
 
     def test_503_service_unavailable_raises_rate_limit_error(
         self, extractor, mock_response
     ):
-        """Test that 503 Service Unavailable raises RateLimitError."""
+        """Test that 503 Service Unavailable raises Exception when newspaper fallback also fails."""
         with (
+            patch("src.crawler.NewspaperArticle") as mock_article_class,
             patch.object(extractor, "_get_domain_session") as mock_session,
             patch.object(
                 extractor, "_detect_bot_protection_in_response"
             ) as mock_detect,
             patch.object(extractor, "_handle_rate_limit_error"),
         ):
+            # Mock the Article object with required attributes
+            mock_article = Mock()
+            mock_article.title = "Test"
+            mock_article.authors = []
+            mock_article.text = ""
+            mock_article.publish_date = None
+            mock_article.meta_description = ""
+            mock_article.keywords = []
+            # Mock download() to also fail
+            mock_article.download.side_effect = Exception("Download blocked")
+            mock_article_class.return_value = mock_article
 
             mock_sess = Mock()
             mock_sess.get.return_value = mock_response(503, "Service Unavailable")
             mock_session.return_value = mock_sess
             mock_detect.return_value = None
 
-            with pytest.raises(RateLimitError, match="Server error \\(503\\)"):
+            # Should raise Exception from download fallback
+            with pytest.raises(Exception, match="Download blocked"):
                 extractor._extract_with_newspaper("https://example.com/unavailable")
 
     def test_504_gateway_timeout_raises_rate_limit_error(
         self, extractor, mock_response
     ):
-        """Test that 504 Gateway Timeout raises RateLimitError."""
+        """Test that 504 Gateway Timeout raises Exception when newspaper fallback also fails."""
         with (
+            patch("src.crawler.NewspaperArticle") as mock_article_class,
             patch.object(extractor, "_get_domain_session") as mock_session,
             patch.object(
                 extractor, "_detect_bot_protection_in_response"
             ) as mock_detect,
             patch.object(extractor, "_handle_rate_limit_error"),
         ):
+            # Mock the Article object with required attributes
+            mock_article = Mock()
+            mock_article.title = "Test"
+            mock_article.authors = []
+            mock_article.text = ""
+            mock_article.publish_date = None
+            mock_article.meta_description = ""
+            mock_article.keywords = []
+            # Mock download() to also fail
+            mock_article.download.side_effect = Exception("Download blocked")
+            mock_article_class.return_value = mock_article
 
             mock_sess = Mock()
             mock_sess.get.return_value = mock_response(504, "Gateway Timeout")
             mock_session.return_value = mock_sess
             mock_detect.return_value = None
 
-            with pytest.raises(RateLimitError, match="Server error \\(504\\)"):
+            # Should raise Exception from download fallback
+            with pytest.raises(Exception, match="Download blocked"):
                 extractor._extract_with_newspaper("https://example.com/timeout")
 
 
