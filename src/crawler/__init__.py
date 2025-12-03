@@ -2512,24 +2512,23 @@ class ContentExtractor:
 
         title = title.strip()
 
+        import re
+
         # Check for obvious truncation patterns
         suspicious_patterns = [
             # Starts with common word endings/fragments (truncated)
-            r"^(peat|ing|ed|ly|tion|ment|ness|ers?|s)\b",
+            (r"^(peat|ing|ed|ly|tion|ment|ness|ers?|s)\b", re.IGNORECASE),
             # Very short titles (less than 10 chars, too short for news)
-            r"^.{1,9}$",
+            (r"^.{1,9}$", 0),
             # Contains only numbers/punctuation
-            r"^[\d\s\-.,;:!?]+$",
+            (r"^[\d\s\-.,;:!?]+$", 0),
             # Starts with lowercase AND very short (likely truncated)
             # Allow longer lowercase titles (artist names, stylized titles, etc.)
-            r"^[a-z].{0,14}$",
+            # NOTE: No IGNORECASE - we want to catch actual lowercase starts
+            (r"^[a-z].{0,14}$", 0),
         ]
 
-        import re
-
-        for i, pattern in enumerate(suspicious_patterns):
-            # Apply IGNORECASE only to specific patterns, not the first one
-            flags = re.IGNORECASE if i > 0 else 0
+        for pattern, flags in suspicious_patterns:
             if re.search(pattern, title, flags):
                 logger.debug(
                     f"Title flagged as suspicious: '{title}' "

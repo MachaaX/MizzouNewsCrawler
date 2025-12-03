@@ -1129,6 +1129,7 @@ def _process_batch(
                     # - BigQuery: only exports status='labeled'
                     # Uses database boilerplate patterns to strip noise
                     MIN_CONTENT_LENGTH = 150
+                    cleaning_metadata = {}
                     if content_text:
                         from urllib.parse import urlparse
 
@@ -1136,7 +1137,7 @@ def _process_batch(
                         # Clean content using persistent patterns from database
                         # Note: Some test implementations may not support dry_run parameter
                         try:
-                            stripped_content, _ = (
+                            stripped_content, cleaning_metadata = (
                                 content_cleaner.process_single_article(
                                     text=content_text,
                                     domain=domain,
@@ -1145,7 +1146,7 @@ def _process_batch(
                             )
                         except TypeError:
                             # Fallback for test mocks without dry_run parameter
-                            stripped_content, _ = (
+                            stripped_content, cleaning_metadata = (
                                 content_cleaner.process_single_article(
                                     content_text, domain
                                 )
@@ -1153,22 +1154,46 @@ def _process_batch(
                     else:
                         stripped_content = ""
 
-                    # Check if content is insufficient (paywall gate)
-                    is_paywall = (
+                    # Check if content is insufficient AND has paywall indicators
+                    has_paywall_patterns = any(
+                        pattern in cleaning_metadata.get("patterns_matched", [])
+                        for pattern in ["subscription", "paywall"]
+                    )
+                    is_insufficient_content = (
                         not stripped_content
                         or len(stripped_content.strip()) < MIN_CONTENT_LENGTH
                     )
-                    if is_paywall:
+                    
+                    # Only mark as paywall if BOTH conditions are met
+                    if is_insufficient_content and has_paywall_patterns:
                         non_boilerplate_len = (
                             len(stripped_content.strip()) if stripped_content else 0
                         )
                         logger.warning(
-                            f"Article has insufficient content - marking "
+                            f"Article has insufficient content with paywall indicators - marking "
                             f"as paywall ({non_boilerplate_len} chars "
                             f"non-boilerplate < {MIN_CONTENT_LENGTH}): {url}"
                         )
                         # Set status='paywall' to save but skip ML
                         article_status = "paywall"
+                    elif is_insufficient_content:
+                        # Short content but no paywall indicators - skip entirely
+                        non_boilerplate_len = (
+                            len(stripped_content.strip()) if stripped_content else 0
+                        )
+                        logger.warning(
+                            f"Article has insufficient content without paywall indicators - skipping "
+                            f"({non_boilerplate_len} chars non-boilerplate < {MIN_CONTENT_LENGTH}): {url}"
+                        )
+                        session.execute(
+                            text("UPDATE candidate_links SET status = :status, error_message = :error WHERE id = :id"),
+                            {
+                                "id": str(url_id),
+                                "status": "extracted",
+                                "error": "Insufficient content (no paywall detected)",
+                            },
+                        )
+                        continue  # Skip to next article
 
                     text_hash = calculate_content_hash(content_text)
 

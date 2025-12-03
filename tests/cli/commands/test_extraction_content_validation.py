@@ -354,7 +354,11 @@ class TestContentValidationLogic:
                 # This simulates the persistent_boilerplate_patterns matching
                 # stltoday.com login form patterns
                 cleaned_text = "DANCING WITH THE STARS\nEric Mccandless"  # 42 chars
-                return cleaned_text, {}
+                # Return metadata indicating subscription patterns were found
+                return cleaned_text, {
+                    "patterns_matched": ["subscription", "paywall"],
+                    "persistent_removals": 3,
+                }
 
         class FakeTelemetry:
             def record_extraction(self, *args, **kwargs):
@@ -400,8 +404,10 @@ class TestContentValidationLogic:
             db=db,
         )
 
-        # Verify NO article was inserted (insufficient content)
-        assert len(db.session.insert_calls) == 0
+        # Verify article WAS inserted with status='paywall' (new behavior)
+        assert len(db.session.insert_calls) == 1
+        inserted_article = db.session.insert_calls[0]
+        assert inserted_article["status"] == "paywall"
         # Verify candidate_link was still marked as 'extracted' to avoid retry
         assert len(db.session.update_calls) >= 1
         assert result["processed"] == 1
