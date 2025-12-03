@@ -604,8 +604,8 @@ class TestContentValidationWithPersistentPatterns:
 
         # Use BalancedBoundaryContentCleaner to strip boilerplate
         # Mock telemetry to return our persistent pattern
-        from unittest.mock import Mock, patch
-        
+        from unittest.mock import Mock
+
         mock_telemetry = Mock()
         mock_telemetry.get_persistent_patterns.return_value = [
             {
@@ -616,8 +616,8 @@ class TestContentValidationWithPersistentPatterns:
                 "removal_reason": "Persistent subscription pattern",
             }
         ]
-        
-        with patch.object(BalancedBoundaryContentCleaner, 'telemetry', mock_telemetry):
+
+        with patch.object(BalancedBoundaryContentCleaner, "telemetry", mock_telemetry):
             cleaner = BalancedBoundaryContentCleaner(enable_telemetry=True)
             cleaner.telemetry = mock_telemetry
             stripped_content, metadata = cleaner.process_single_article(
@@ -632,4 +632,6 @@ class TestContentValidationWithPersistentPatterns:
         assert len(stripped_content.strip()) < 150
 
         # Verify pattern lookup was called
-        mock_telemetry.get_persistent_patterns.assert_called_once_with("testboilerplate.com")
+        mock_telemetry.get_persistent_patterns.assert_called_once_with(
+            "testboilerplate.com"
+        )
