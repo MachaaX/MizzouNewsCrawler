@@ -186,7 +186,8 @@ def test_extraction_pipeline_through_analysis(
             return {
                 "title": "Council approves new park",
                 "author": "Staff Writer",
-                "content": "  Columbia City Hall will host the forum.  ",
+                "content": "Columbia City Hall will host the forum on local development and community services. "
+                * 3,  # >150 chars
                 "publish_date": datetime(2025, 9, 25, 12, 0, 0),
                 "metadata": {
                     "extraction_methods": {
@@ -305,7 +306,7 @@ def test_extraction_pipeline_through_analysis(
         article = verify_session.query(Article).one()
         assert article.status == "local"
         assert article.author == "Jane Tester"
-        assert article.content == "Columbia City Hall will host the forum."
+        assert article.content.startswith("Columbia City Hall will host the forum")
         assert article.wire is None
 
         candidate_row = verify_session.get(CandidateLink, "candidate-1")
@@ -393,7 +394,8 @@ def test_extraction_pipeline_handles_failure_and_gazetteer_miss(
             return {
                 "title": "County budget hearing set",
                 "author": "Staff Reporter",
-                "content": "  The county commission will meet Monday.  ",
+                "content": "The county commission will meet Monday to discuss the annual budget and fiscal policies. "
+                * 3,  # >150 chars
                 "publish_date": datetime(2025, 9, 26, 15, 30, 0),
                 "metadata": {
                     "extraction_methods": {

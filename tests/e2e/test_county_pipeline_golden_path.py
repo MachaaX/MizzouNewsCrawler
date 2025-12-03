@@ -479,7 +479,8 @@ def test_county_pipeline_golden_path(
             return {
                 "title": "Council approves new park",
                 "author": "Staff Writer",
-                "content": "  Columbia City Hall will host the forum.  ",
+                "content": "Columbia City Hall will host the forum on local development. "
+                * 5,  # >150 chars
                 "publish_date": datetime(2025, 9, 25, 12, 0, 0),
                 "metadata": {
                     "extraction_methods": {
