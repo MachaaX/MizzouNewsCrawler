@@ -603,7 +603,7 @@ class TestContentValidationWithPersistentPatterns:
         )
 
         # Use BalancedBoundaryContentCleaner to strip boilerplate
-        cleaner = BalancedBoundaryContentCleaner(enable_telemetry=False)
+        cleaner = BalancedBoundaryContentCleaner(enable_telemetry=True)
         stripped_content, metadata = cleaner.process_single_article(
             text=content_text,
             domain="testboilerplate.com",
