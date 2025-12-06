@@ -58,6 +58,8 @@ gazetteer_backfill_full.log
 data/
 !lookups/
 !lookups/**/*.db
+!src/mcmetadata/data/
+!src/mcmetadata/data/**
 
 # Test artifacts
 lookups/snapshots/*
