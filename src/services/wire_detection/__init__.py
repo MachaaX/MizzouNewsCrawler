@@ -1,8 +1,8 @@
 """Wire detection services and helpers."""
 
 from .mediacloud import (
-    APIResponseError,
     DEFAULT_RATE_PER_MINUTE,
+    APIResponseError,
     DetectionResult,
     MCException,
     MediaCloudArticle,

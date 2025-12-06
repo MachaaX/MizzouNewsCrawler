@@ -14,7 +14,9 @@ _HAS_MEDIACLOUD = False
 try:  # pragma: no cover - import guard exercised via unit tests
     from mediacloud.api import SearchApi
     from mediacloud.error import APIResponseError, MCException
-except ModuleNotFoundError:  # pragma: no cover - exercised in CI without dependency installed
+except (
+    ModuleNotFoundError
+):  # pragma: no cover - exercised in CI without dependency installed
     SearchApi = Any  # type: ignore[assignment]
 
     class APIResponseError(RuntimeError):
@@ -28,6 +30,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised in CI without depend
         """Fallback exception mirroring mediacloud.MCException."""
 
         pass
+
 else:
     _HAS_MEDIACLOUD = True
 
