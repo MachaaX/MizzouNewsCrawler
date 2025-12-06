@@ -78,7 +78,9 @@ def _ensure_wire_columns(engine) -> None:
 
     with engine.begin() as conn:
         for name in missing:
-            conn.execute(text(f"ALTER TABLE articles ADD COLUMN {name} {additions[name]}"))
+            conn.execute(
+                text(f"ALTER TABLE articles ADD COLUMN {name} {additions[name]}")
+            )
 
 
 def _create_wire_test_article(
@@ -427,9 +429,7 @@ class TestProcessWireDetection:
         monkeypatch.setattr(
             continuous_processor, "get_mediacloud_detector", lambda: dummy_detector
         )
-        monkeypatch.setattr(
-            continuous_processor, "_claim_wire_articles", lambda _: []
-        )
+        monkeypatch.setattr(continuous_processor, "_claim_wire_articles", lambda _: [])
 
         assert continuous_processor.process_wire_detection(3) is False
         dummy_detector.detect.assert_not_called()
@@ -471,7 +471,9 @@ class TestProcessWireDetection:
             lambda limit: [pending],
         )
 
-        captured_calls: list[tuple[continuous_processor.PendingWireArticle, MagicMock]] = []
+        captured_calls: list[
+            tuple[continuous_processor.PendingWireArticle, MagicMock]
+        ] = []
 
         def fake_apply(result_pending, result_object):
             captured_calls.append((result_pending, result_object))
@@ -768,7 +770,9 @@ class TestApplyDetectionResult:
             db = DatabaseManager()
             try:
                 session = db.session
-                article = session.query(Article).filter_by(id=record["article_id"]).one()
+                article = (
+                    session.query(Article).filter_by(id=record["article_id"]).one()
+                )
                 candidate = (
                     session.query(CandidateLink)
                     .filter_by(id=record["candidate_id"])
@@ -830,7 +834,9 @@ class TestApplyDetectionResult:
             db = DatabaseManager()
             try:
                 session = db.session
-                article = session.query(Article).filter_by(id=record["article_id"]).one()
+                article = (
+                    session.query(Article).filter_by(id=record["article_id"]).one()
+                )
                 candidate = (
                     session.query(CandidateLink)
                     .filter_by(id=record["candidate_id"])
@@ -888,7 +894,9 @@ class TestApplyDetectionResult:
             db = DatabaseManager()
             try:
                 session = db.session
-                article = session.query(Article).filter_by(id=record["article_id"]).one()
+                article = (
+                    session.query(Article).filter_by(id=record["article_id"]).one()
+                )
                 candidate = (
                     session.query(CandidateLink)
                     .filter_by(id=record["candidate_id"])

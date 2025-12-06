@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
-from typing import Iterable, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Iterable, Optional
 from urllib.parse import urlparse
 
 from mediacloud.api import SearchApi
@@ -39,8 +39,8 @@ class DetectionResult:
     query: str
     story_count: int
     matched_story_count: int
-    matched_hosts: List[str]
-    matched_story_ids: List[str]
+    matched_hosts: list[str]
+    matched_story_ids: list[str]
     status: str
     queried_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -133,9 +133,9 @@ def build_query(title: str) -> str:
 def summarize_matches(
     base: MediaCloudArticle,
     stories: Iterable[dict],
-) -> tuple[int, List[str], List[str]]:
-    matched_hosts: List[str] = []
-    matched_story_ids: List[str] = []
+) -> tuple[int, list[str], list[str]]:
+    matched_hosts: list[str] = []
+    matched_story_ids: list[str] = []
     base_host = base.host
     for story in stories:
         story_url = story.get("url") or ""
@@ -169,13 +169,15 @@ class MediaCloudDetector:
         *,
         rate_per_minute: float = DEFAULT_RATE_PER_MINUTE,
         logger: logging.Logger | None = None,
-    ) -> "MediaCloudDetector":
+    ) -> MediaCloudDetector:
         if not token:
             raise ValueError("MediaCloud API token is required")
         try:
             search_api = SearchApi(token)
         except MCException as exc:  # pragma: no cover - constructor rarely fails
-            raise RuntimeError(f"Failed to initialise MediaCloud client: {exc}") from exc
+            raise RuntimeError(
+                f"Failed to initialise MediaCloud client: {exc}"
+            ) from exc
         return cls(
             search_api=search_api,
             rate_limiter=RateLimiter(rate_per_minute),
@@ -189,7 +191,7 @@ class MediaCloudDetector:
         )
 
         self.rate_limiter.wait()
-        stories: List[dict]
+        stories: list[dict]
         try:
             stories = self._story_list(article, query)
             status = "ok"
@@ -234,7 +236,7 @@ class MediaCloudDetector:
         query: str,
         *,
         page_size: int = 100,
-    ) -> List[dict]:
+    ) -> list[dict]:
         extracted_at = article.extracted_at
         if extracted_at is None:
             start_date = end_date = datetime.utcnow().date()

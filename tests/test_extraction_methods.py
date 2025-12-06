@@ -487,7 +487,9 @@ class TestContentExtractor:
             return {}
 
         monkeypatch.setattr(extractor, "_extract_with_newspaper", note_newspaper)
-        monkeypatch.setattr(extractor, "_extract_with_beautifulsoup", note_beautifulsoup)
+        monkeypatch.setattr(
+            extractor, "_extract_with_beautifulsoup", note_beautifulsoup
+        )
         monkeypatch.setattr(extractor, "_extract_with_selenium", note_selenium)
 
         extractor.use_mcmetadata = True
@@ -561,7 +563,9 @@ class TestContentExtractor:
 
         extractor.use_mcmetadata = True
         monkeypatch.setattr(extractor, "_extract_with_newspaper", fake_newspaper)
-        monkeypatch.setattr(extractor, "_extract_with_beautifulsoup", note_beautifulsoup)
+        monkeypatch.setattr(
+            extractor, "_extract_with_beautifulsoup", note_beautifulsoup
+        )
         monkeypatch.setattr(extractor, "_extract_with_selenium", note_selenium)
 
         result = extractor.extract_content("https://example.com/partial")
@@ -622,7 +626,9 @@ class TestContentExtractor:
 
         extractor.use_mcmetadata = True
         monkeypatch.setattr(extractor, "_extract_with_newspaper", fake_newspaper)
-        monkeypatch.setattr(extractor, "_extract_with_beautifulsoup", fake_beautifulsoup)
+        monkeypatch.setattr(
+            extractor, "_extract_with_beautifulsoup", fake_beautifulsoup
+        )
         monkeypatch.setattr(extractor, "_extract_with_selenium", fail_selenium)
 
         result = extractor.extract_content("https://example.com/boom")

@@ -34,7 +34,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
-from typing import Iterable, List, Optional
+from typing import Iterable, Optional
 
 import requests
 
@@ -77,7 +77,7 @@ class ExtractionResult:
 	title_chars: int
 	content_chars: int
 	has_author: bool
-	authors: Optional[List[str]]
+	authors: Optional[list[str]]
 	publish_date: Optional[str]
 	text_extraction_method: Optional[str]
 	duration_sec: float
@@ -165,10 +165,10 @@ def load_urls(
 	column: str,
 	limit: Optional[int],
 	offset: int,
-) -> List[str]:
+) -> list[str]:
 	"""Read URLs from text or CSV file, applying optional limit."""
 
-	urls: List[str] = []
+	urls: list[str] = []
 
 	if not path.exists():
 		raise FileNotFoundError(f"Input file not found: {path}")
@@ -249,7 +249,7 @@ def run_crawler_extractor(
 		content = payload.get("content")
 		author = payload.get("author")
 		publish_date = payload.get("publish_date")
-		authors_list: Optional[List[str]] = None
+		authors_list: Optional[list[str]] = None
 		if isinstance(author, str) and author.strip():
 			authors_list = [author.strip()]
 		elif isinstance(author, (list, tuple)):
@@ -290,7 +290,7 @@ def run_mcmetadata(
 	"""Execute mcmetadata extraction using provided HTML."""
 
 	t0 = time.perf_counter()
-	stats_accumulator = {name: 0 for name in mcmetadata.STAT_NAMES}
+	stats_accumulator = dict.fromkeys(mcmetadata.STAT_NAMES, 0)
 	try:
 		result = mcmetadata.extract(
 			url=url,
@@ -373,7 +373,7 @@ def write_output(path: Path, rows: Iterable[dict[str, object]]) -> None:
 			writer.writerow(row)
 
 
-def summarize(results: List[dict[str, object]]) -> None:
+def summarize(results: list[dict[str, object]]) -> None:
 	"""Print a concise summary of collected metrics."""
 
 	total = len(results)
@@ -459,7 +459,7 @@ def main() -> None:
 
 	extractor = ContentExtractor()
 
-	rows: List[dict[str, object]] = []
+	rows: list[dict[str, object]] = []
 
 	for index, url in enumerate(urls, start=1):
 		logger.info("[%d/%d] Fetching %s", index, len(urls), url)

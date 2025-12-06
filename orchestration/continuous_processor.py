@@ -21,7 +21,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
 
 from sqlalchemy import text
 
@@ -373,8 +372,8 @@ class PendingWireArticle:
     status: str
 
 
-def _claim_wire_articles(limit: int) -> List[PendingWireArticle]:
-    claimed: List[PendingWireArticle] = []
+def _claim_wire_articles(limit: int) -> list[PendingWireArticle]:
+    claimed: list[PendingWireArticle] = []
     attempts = 0
 
     while len(claimed) < limit and attempts < limit * 3:

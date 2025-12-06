@@ -265,9 +265,7 @@ class ExtractionMetrics:
                 "author": bool(final_result.get("author")),
                 "content": bool(final_result.get("content")),
                 "publish_date": bool(final_result.get("publish_date")),
-                "metadata": self._metadata_is_meaningful(
-                    final_result.get("metadata")
-                ),
+                "metadata": self._metadata_is_meaningful(final_result.get("metadata")),
             }
 
             # Capture final field attribution from metadata

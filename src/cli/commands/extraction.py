@@ -60,10 +60,9 @@ WORK_QUEUE_URL = os.getenv(
 )
 USE_WORK_QUEUE = os.getenv("USE_WORK_QUEUE", "false").lower() == "true"
 
-ENABLE_MEDIACLOUD_WIRE_CHECK = (
-    os.getenv("ENABLE_WIRE_DETECTION", "true").lower() == "true"
-    and bool(os.getenv("MEDIACLOUD_API_TOKEN"))
-)
+ENABLE_MEDIACLOUD_WIRE_CHECK = os.getenv(
+    "ENABLE_WIRE_DETECTION", "true"
+).lower() == "true" and bool(os.getenv("MEDIACLOUD_API_TOKEN"))
 
 
 class _PlaceholderNotFoundError(Exception):

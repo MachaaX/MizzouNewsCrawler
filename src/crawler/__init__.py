@@ -377,10 +377,9 @@ class ContentExtractor:
             )
 
         self.use_mcmetadata = bool(use_mcmetadata)
-        self.mcmetadata_include_other_metadata = (
-            os.getenv("MCMETADATA_INCLUDE_OTHER", "true").lower()
-            in ("1", "true", "yes", "on")
-        )
+        self.mcmetadata_include_other_metadata = os.getenv(
+            "MCMETADATA_INCLUDE_OTHER", "true"
+        ).lower() in ("1", "true", "yes", "on")
 
         if self.use_mcmetadata and not MCMETADATA_AVAILABLE:
             logger.warning(
@@ -1203,9 +1202,7 @@ class ContentExtractor:
                     )
                     logger.info(f"mcmetadata extraction completed for {url}")
                     if metrics:
-                        metrics.end_method(
-                            "mcmetadata", True, None, mcmetadata_result
-                        )
+                        metrics.end_method("mcmetadata", True, None, mcmetadata_result)
                 else:
                     if metrics:
                         metrics.end_method(
@@ -1666,9 +1663,7 @@ class ContentExtractor:
             else include_other_metadata
         )
 
-        stats_accumulator = {
-            name: 0 for name in getattr(mcmetadata, "STAT_NAMES", [])
-        }
+        stats_accumulator = {name: 0 for name in getattr(mcmetadata, "STAT_NAMES", [])}
 
         mc_result = mcmetadata.extract(
             url=url,

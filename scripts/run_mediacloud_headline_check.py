@@ -24,7 +24,7 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from mediacloud.error import APIResponseError, MCException
 
@@ -55,8 +55,8 @@ class ArticleRecord:
         return normalize_host(self.url)
 
 
-def load_candidates(path: str) -> List[ArticleRecord]:
-    records: List[ArticleRecord] = []
+def load_candidates(path: str) -> list[ArticleRecord]:
+    records: list[ArticleRecord] = []
     with open(path, newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         required_fields = {"media_cloud_candidate", "article_id", "source", "url", "title", "extracted_at_utc"}
@@ -78,8 +78,11 @@ def load_candidates(path: str) -> List[ArticleRecord]:
                     marker=marker,
                 )
             )
+def write_results(path: str, rows: list[dict], fieldnames: list[str]) -> None:
     return records
-def write_results(path: str, rows: List[dict], fieldnames: List[str]) -> None:
+
+
+def write_results(path: str, rows: list[dict], fieldnames: list[str]) -> None:
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -122,7 +125,7 @@ def run(args: argparse.Namespace) -> int:
         args.rate,
     )
 
-    results: List[dict] = []
+    results: list[dict] = []
     fieldnames = [
         "article_id",
         "source",

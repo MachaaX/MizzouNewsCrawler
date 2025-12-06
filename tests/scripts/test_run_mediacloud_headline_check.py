@@ -1,15 +1,14 @@
 import argparse
 import csv
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from scripts import run_mediacloud_headline_check as cli
 from src.services.wire_detection import mediacloud as mc
-
 
 REQUIRED_FIELDS = [
     "media_cloud_candidate",
@@ -21,7 +20,7 @@ REQUIRED_FIELDS = [
 ]
 
 
-def write_candidates_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
+def write_candidates_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=REQUIRED_FIELDS)
         writer.writeheader()
@@ -45,7 +44,10 @@ def test_normalize_host(url: str, expected: str) -> None:
     "value,expected",
     [
         ("2025-12-05T18:00:00Z", datetime(2025, 12, 5, 18, 0, tzinfo=timezone.utc)),
-        ("2025-12-05T18:00:00+02:00", datetime(2025, 12, 5, 16, 0, tzinfo=timezone.utc)),
+        (
+            "2025-12-05T18:00:00+02:00",
+            datetime(2025, 12, 5, 16, 0, tzinfo=timezone.utc),
+        ),
         ("2025-12-05T18:00:00", datetime(2025, 12, 5, 18, 0, tzinfo=timezone.utc)),
         ("", None),
         ("not-a-date", None),
@@ -98,13 +100,15 @@ def test_load_candidates_missing_required_fields(tmp_path: Path) -> None:
         cli.load_candidates(str(input_path))
 
 
-def test_rate_limiter_waits_when_called_too_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rate_limiter_waits_when_called_too_fast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     limiter = mc.RateLimiter(2.0)  # 30 seconds between calls
 
     times = iter([10.0, 10.4])  # record(), wait()
     monkeypatch.setattr(mc.time, "monotonic", lambda: next(times))
 
-    sleep_calls: List[float] = []
+    sleep_calls: list[float] = []
     monkeypatch.setattr(mc.time, "sleep", sleep_calls.append)
 
     limiter.record()
@@ -143,7 +147,7 @@ def test_summarize_matches_excludes_origin_host() -> None:
 
 
 def test_mediacloud_detector_story_list_window() -> None:
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     class DummySearchApi:
         def story_list(self, **kwargs: Any) -> Any:
@@ -167,7 +171,9 @@ def test_mediacloud_detector_story_list_window() -> None:
     assert captured["page_size"] == 100
 
 
-def test_run_writes_results_and_respects_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_writes_results_and_respects_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     input_path = tmp_path / "input.csv"
     output_path = tmp_path / "output.csv"
 
@@ -194,10 +200,10 @@ def test_run_writes_results_and_respects_limit(tmp_path: Path, monkeypatch: pyte
     )
 
     class StubDetector:
-        instances: List["StubDetector"] = []
+        instances: list["StubDetector"] = []
 
         def __init__(self) -> None:
-            self.detect_calls: List[mc.MediaCloudArticle] = []
+            self.detect_calls: list[mc.MediaCloudArticle] = []
             StubDetector.instances.append(self)
 
         def detect(self, article: mc.MediaCloudArticle) -> mc.DetectionResult:
@@ -216,7 +222,7 @@ def test_run_writes_results_and_respects_limit(tmp_path: Path, monkeypatch: pyte
         def search_api(self) -> Any:
             class _Profile:
                 @staticmethod
-                def user_profile() -> Dict[str, Any]:
+                def user_profile() -> dict[str, Any]:
                     return {"username": "tester", "roles": ["user"]}
 
             return _Profile()
@@ -224,7 +230,9 @@ def test_run_writes_results_and_respects_limit(tmp_path: Path, monkeypatch: pyte
     stub_detector = StubDetector()
 
     monkeypatch.setattr(
-        cli, "MediaCloudDetector", MagicMock(from_token=MagicMock(return_value=stub_detector))
+        cli,
+        "MediaCloudDetector",
+        MagicMock(from_token=MagicMock(return_value=stub_detector)),
     )
 
     args = argparse.Namespace(
@@ -290,7 +298,7 @@ def test_run_records_api_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         def search_api(self) -> Any:
             class _Profile:
                 @staticmethod
-                def user_profile() -> Dict[str, Any]:
+                def user_profile() -> dict[str, Any]:
                     return {"username": "tester", "roles": ["user"]}
 
             return _Profile()
@@ -298,7 +306,9 @@ def test_run_records_api_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     stub_detector = ErrorDetector()
 
     monkeypatch.setattr(
-        cli, "MediaCloudDetector", MagicMock(from_token=MagicMock(return_value=stub_detector))
+        cli,
+        "MediaCloudDetector",
+        MagicMock(from_token=MagicMock(return_value=stub_detector)),
     )
 
     args = argparse.Namespace(

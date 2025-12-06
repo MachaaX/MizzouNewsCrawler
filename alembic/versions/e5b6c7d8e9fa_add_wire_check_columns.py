@@ -39,7 +39,7 @@ def upgrade() -> None:
     )
 
     # Ensure existing rows are marked complete so legacy content is not reprocessed.
-    op.execute("UPDATE articles SET wire_check_status = '{}'".format(COMPLETE_DEFAULT))
+    op.execute(f"UPDATE articles SET wire_check_status = '{COMPLETE_DEFAULT}'")
 
     # New rows should default to pending so they are eligible for MediaCloud processing.
     op.alter_column(
