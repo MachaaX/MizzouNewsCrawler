@@ -9,36 +9,34 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
 
+_HAS_MEDIACLOUD = False
+
 try:  # pragma: no cover - import guard exercised via unit tests
     from mediacloud.api import SearchApi
-    from mediacloud.error import APIResponseError as _APIResponseError
-    from mediacloud.error import MCException as _MCException
-    _HAS_MEDIACLOUD = True
+    from mediacloud.error import APIResponseError, MCException
 except ModuleNotFoundError:  # pragma: no cover - exercised in CI without dependency installed
     SearchApi = Any  # type: ignore[assignment]
-    _HAS_MEDIACLOUD = False
 
-    class _APIResponseError(RuntimeError):
+    class APIResponseError(RuntimeError):
         """Fallback error used when mediacloud dependency is missing."""
 
         def __init__(self, message: str, status_code: int | None = None) -> None:
             super().__init__(message)
             self.status_code = status_code or 0
 
-    class _MCException(RuntimeError):
+    class MCException(RuntimeError):
         """Fallback exception mirroring mediacloud.MCException."""
 
         pass
-
-
-APIResponseError = _APIResponseError
-MCException = _MCException
+else:
+    _HAS_MEDIACLOUD = True
 
 
 class MissingDependencyError(RuntimeError):
     """Raised when the mediacloud client library is not installed."""
 
     pass
+
 
 DEFAULT_RATE_PER_MINUTE = 2.0
 LOG = logging.getLogger(__name__)
