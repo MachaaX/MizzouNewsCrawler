@@ -126,6 +126,7 @@ class TestExtractionMetrics:
         assert field_stats["content"] is False
         assert field_stats["author"] is False
         assert field_stats["publish_date"] is True
+        assert field_stats["metadata"] is False
 
 
 def create_telemetry_tables(db_path: str) -> None:
@@ -595,6 +596,7 @@ class TestComprehensiveExtractionTelemetry:
         assert newspaper_stats["count"] >= 3
         assert "title_success_rate" in newspaper_stats
         assert "content_success_rate" in newspaper_stats
+        assert "metadata_success_rate" in newspaper_stats
 
 
 @pytest.mark.postgres

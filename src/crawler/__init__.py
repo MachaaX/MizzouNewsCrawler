@@ -47,6 +47,16 @@ except ImportError:
     NEWSPAPER_AVAILABLE = False
     logging.warning("newspaper4k not available, falling back to BeautifulSoup only")
 
+# MediaCloud metadata extractor
+try:
+    import mcmetadata
+
+    MCMETADATA_AVAILABLE = True
+except ImportError:
+    mcmetadata = None
+    MCMETADATA_AVAILABLE = False
+    logging.warning("mcmetadata not available, mcmetadata extraction disabled")
+
 # Cloudscraper for Cloudflare bypass
 try:
     import cloudscraper
@@ -348,9 +358,35 @@ class NewsCrawler:
 class ContentExtractor:
     """Extracts structured content from HTML pages."""
 
-    def __init__(self, user_agent: str = None, timeout: int = 10):
+    def __init__(
+        self,
+        user_agent: str = None,
+        timeout: int = 10,
+        use_mcmetadata: Optional[bool] = None,
+    ):
         """Initialize ContentExtractor with anti-detection capabilities."""
         self.timeout = timeout  # Reduced from 20 for faster requests
+
+        # MediaCloud metadata integration (feature-flagged)
+        if use_mcmetadata is None:
+            use_mcmetadata = os.getenv("ENABLE_MCMETADATA", "").lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
+
+        self.use_mcmetadata = bool(use_mcmetadata)
+        self.mcmetadata_include_other_metadata = (
+            os.getenv("MCMETADATA_INCLUDE_OTHER", "true").lower()
+            in ("1", "true", "yes", "on")
+        )
+
+        if self.use_mcmetadata and not MCMETADATA_AVAILABLE:
+            logger.warning(
+                "mcmetadata requested but package not available; disabling integration"
+            )
+            self.use_mcmetadata = False
 
         # Persistent driver for reuse across multiple extractions
         self._persistent_driver = None
@@ -1116,9 +1152,10 @@ class ContentExtractor:
         """Fetch page if needed, extract article data using multiple methods.
 
         Uses intelligent field-level fallback:
-        1. newspaper4k (primary) - extract all fields
-        2. BeautifulSoup (fallback) - extract only missing fields
-        3. Selenium (final fallback) - extract only remaining missing fields
+        1. mcmetadata (if enabled) - extract all fields
+        2. newspaper4k (primary legacy) - extract only missing fields
+        3. BeautifulSoup (fallback) - extract remaining missing fields
+        4. Selenium (final fallback) - extract only remaining missing fields
 
         Args:
             url: URL to extract content from
@@ -1145,17 +1182,54 @@ class ContentExtractor:
             "extraction_methods": {},  # Track which method worked for field
         }
 
-        # Try newspaper4k first (primary method)
-        if NEWSPAPER_AVAILABLE:
+        html_for_methods = html
+
+        # Try mcmetadata first if enabled
+        if self.use_mcmetadata and MCMETADATA_AVAILABLE:
+            try:
+                logger.info(f"Attempting mcmetadata extraction for {url}")
+                if metrics:
+                    metrics.start_method("mcmetadata")
+
+                mcmetadata_result = self._extract_with_mcmetadata(
+                    url,
+                    html_for_methods,
+                    include_other_metadata=self.mcmetadata_include_other_metadata,
+                )
+
+                if mcmetadata_result:
+                    self._merge_extraction_results(
+                        result, mcmetadata_result, "mcmetadata", None, metrics
+                    )
+                    logger.info(f"mcmetadata extraction completed for {url}")
+                    if metrics:
+                        metrics.end_method(
+                            "mcmetadata", True, None, mcmetadata_result
+                        )
+                else:
+                    if metrics:
+                        metrics.end_method(
+                            "mcmetadata", False, "No content extracted", {}
+                        )
+
+            except Exception as e:  # pragma: no cover - network/parse variety
+                logger.info(f"mcmetadata extraction failed for {url}: {e}")
+                if metrics:
+                    metrics.end_method("mcmetadata", False, str(e), {})
+
+        # Determine what fields remain after mcmetadata
+        missing_fields = self._get_missing_fields(result)
+
+        # Try newspaper4k if mcmetadata is disabled or gaps remain
+        if NEWSPAPER_AVAILABLE and (not self.use_mcmetadata or missing_fields):
             try:
                 logger.info(f"Attempting newspaper4k extraction for {url}")
                 if metrics:
                     metrics.start_method("newspaper4k")
 
-                newspaper_result = self._extract_with_newspaper(url, html)
+                newspaper_result = self._extract_with_newspaper(url, html_for_methods)
 
                 if newspaper_result:
-                    # Copy all successfully extracted fields
                     self._merge_extraction_results(
                         result, newspaper_result, "newspaper4k", None, metrics
                     )
@@ -1172,36 +1246,28 @@ class ContentExtractor:
                         )
 
             except NotFoundError as e:
-                # 404/410 - URL permanently missing, stop all fallback attempts
                 logger.warning(f"URL not found (404/410), stopping extraction: {url}")
                 if metrics:
                     metrics.end_method("newspaper4k", False, str(e), {})
-                raise  # Re-raise to prevent BeautifulSoup/Selenium fallback
+                raise
             except RateLimitError as e:
-                # Rate limiting/bot protection, stop all fallback attempts
                 logger.warning(f"Rate limit/bot protection, stopping extraction: {url}")
                 if metrics:
                     metrics.end_method("newspaper4k", False, str(e), {})
-                raise  # Re-raise to prevent BeautifulSoup/Selenium fallback
+                raise
             except Exception as e:
                 logger.info(f"newspaper4k extraction failed for {url}: {e}")
 
-                # Track if this was bot protection to check after Selenium
                 bot_protection_failure = "Bot protection" in str(
                     e
                 ) or "Server error (403)" in str(e)
                 if bot_protection_failure:
                     result["_bot_protection_detected"] = True
 
-                # Try to get any partial result with metadata (including HTTP
-                # status)
                 partial_result = {}
                 if hasattr(e, "__context__") and hasattr(e.__context__, "response"):
-                    # Some HTTP errors might have response info
                     pass
 
-                # Check if this is an HTTP error with status code in the
-                # message
                 error_str = str(e)
                 if "Status code" in error_str:
                     import re
@@ -1582,6 +1648,99 @@ class ContentExtractor:
         content = result.get("content", "").strip()
 
         return bool(title) or (bool(content) and len(content) > 100)
+
+    def _extract_with_mcmetadata(
+        self,
+        url: str,
+        html: Optional[str] = None,
+        include_other_metadata: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Extract content using MediaCloud's mcmetadata pipeline."""
+
+        if not MCMETADATA_AVAILABLE:
+            raise RuntimeError("mcmetadata library is not installed")
+
+        include_other = (
+            self.mcmetadata_include_other_metadata
+            if include_other_metadata is None
+            else include_other_metadata
+        )
+
+        stats_accumulator = {
+            name: 0 for name in getattr(mcmetadata, "STAT_NAMES", [])
+        }
+
+        mc_result = mcmetadata.extract(
+            url=url,
+            html_text=html,
+            include_other_metadata=include_other,
+            stats_accumulator=stats_accumulator,
+        )
+
+        text_content = mc_result.get("text_content")
+        if isinstance(text_content, bytes):
+            text_content = text_content.decode("utf-8", errors="ignore")
+        if isinstance(text_content, str):
+            text_content = text_content.strip()
+
+        article_title = mc_result.get("article_title")
+
+        authors_raw: Any = None
+        if include_other:
+            others = mc_result.get("other") or {}
+            authors_raw = others.get("authors")
+        if not authors_raw:
+            authors_raw = mc_result.get("authors")
+
+        author_list: list[str] = []
+        if isinstance(authors_raw, (list, tuple, set)):
+            for item in authors_raw:
+                if isinstance(item, str):
+                    cleaned = item.strip()
+                    if cleaned:
+                        author_list.append(cleaned)
+        elif isinstance(authors_raw, str):
+            cleaned = authors_raw.strip()
+            if cleaned:
+                author_list.append(cleaned)
+
+        author_value = "; ".join(author_list) if author_list else None
+
+        publish_date = mc_result.get("publication_date")
+        if isinstance(publish_date, datetime):
+            publish_date_value: Optional[str] = publish_date.isoformat()
+        elif publish_date is not None:
+            publish_date_value = str(publish_date)
+        else:
+            publish_date_value = None
+
+        metadata_payload: Dict[str, Any] = {
+            "extraction_method": "mcmetadata",
+            "text_extraction_method": mc_result.get("text_extraction_method"),
+        }
+
+        mcmetadata_info = {
+            "normalized_url": mc_result.get("normalized_url"),
+            "canonical_url": mc_result.get("canonical_url"),
+            "language": mc_result.get("language"),
+            "stats": {k: float(v) for k, v in stats_accumulator.items()},
+        }
+
+        # Remove keys with falsy values to avoid cluttering metadata
+        metadata_payload["mcmetadata"] = {
+            key: value
+            for key, value in mcmetadata_info.items()
+            if value not in (None, "")
+        }
+
+        return {
+            "url": mc_result.get("url") or url,
+            "title": article_title,
+            "author": author_value,
+            "publish_date": publish_date_value,
+            "content": text_content,
+            "metadata": metadata_payload,
+        }
 
     def _extract_with_newspaper(self, url: str, html: str = None) -> Dict[str, Any]:
         """Extract content using newspaper4k library with cloudscraper support."""

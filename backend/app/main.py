@@ -2486,6 +2486,7 @@ def get_field_extraction_stats(
                             "author_success": 0,
                             "content_success": 0,
                             "date_success": 0,
+                            "metadata_success": 0,
                         },
                     )
 
@@ -2499,6 +2500,8 @@ def get_field_extraction_stats(
                         stats["content_success"] += 1
                     if method_fields.get("publish_date"):
                         stats["date_success"] += 1
+                    if method_fields.get("metadata"):
+                        stats["metadata_success"] += 1
 
             # Format results
             results = []
@@ -2512,6 +2515,7 @@ def get_field_extraction_stats(
                     "author_success_rate": stats["author_success"] / denominator,
                     "content_success_rate": stats["content_success"] / denominator,
                     "date_success_rate": stats["date_success"] / denominator,
+                    "metadata_success_rate": stats["metadata_success"] / denominator,
                 }
 
                 # Filter by field if specified
@@ -2521,6 +2525,7 @@ def get_field_extraction_stats(
                         "author": stats["author_success"],
                         "content": stats["content_success"],
                         "publish_date": stats["date_success"],
+                        "metadata": stats["metadata_success"],
                     }
                     if field_counts.get(field, 0) > 0:
                         results.append(entry)

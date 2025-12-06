@@ -202,13 +202,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Submit Cloud Build
+      - name: Trigger Cloud Build
         run: |
-          gcloud builds submit \
-            --config=gcp/cloudbuild/cloudbuild-base.yaml \
+          BUILD_ID=$(gcloud builds triggers run build-base-manual \
+            --branch="${{ github.ref_name }}" \
             --project=${{ secrets.GCP_PROJECT }} \
-            --substitutions=BRANCH_NAME="${{ github.ref_name }},COMMIT_SHA=${{ github.sha }}"
-          echo "✅ Base image build submitted"
+            --format="value(metadata.build.id)" 2>/dev/null)
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Failed to trigger base image build"
+            gcloud builds triggers run build-base-manual \
+              --branch="${{ github.ref_name }}" \
+              --project=${{ secrets.GCP_PROJECT }}
+            exit 1
+          fi
+          echo "✅ Base image build triggered (build ID: $BUILD_ID)"
 
   build-ml-base:
     name: Build ML Base Image
@@ -229,13 +236,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Submit Cloud Build
+      - name: Trigger Cloud Build
         run: |
-          gcloud builds submit \
-            --config=gcp/cloudbuild/cloudbuild-ml-base.yaml \
+          BUILD_ID=$(gcloud builds triggers run build-ml-base-manual \
+            --branch="${{ github.ref_name }}" \
             --project=${{ secrets.GCP_PROJECT }} \
-            --substitutions=BRANCH_NAME="${{ github.ref_name }},COMMIT_SHA=${{ github.sha }}"
-          echo "✅ ML base image build submitted"
+            --format="value(metadata.build.id)" 2>/dev/null)
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Failed to trigger ml-base image build"
+            gcloud builds triggers run build-ml-base-manual \
+              --branch="${{ github.ref_name }}" \
+              --project=${{ secrets.GCP_PROJECT }}
+            exit 1
+          fi
+          echo "✅ ML base image build triggered (build ID: $BUILD_ID)"
 
   build-processor:
     name: Build Processor
@@ -256,13 +270,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Submit Cloud Build
+      - name: Trigger Cloud Build
         run: |
-          gcloud builds submit \
-            --config=gcp/cloudbuild/cloudbuild-processor.yaml \
+          BUILD_ID=$(gcloud builds triggers run build-processor-manual \
+            --branch="${{ github.ref_name }}" \
             --project=${{ secrets.GCP_PROJECT }} \
-            --substitutions=BRANCH_NAME="${{ github.ref_name }},COMMIT_SHA=${{ github.sha }}"
-          echo "✅ Processor build submitted"
+            --format="value(metadata.build.id)" 2>/dev/null)
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Failed to trigger processor build"
+            gcloud builds triggers run build-processor-manual \
+              --branch="${{ github.ref_name }}" \
+              --project=${{ secrets.GCP_PROJECT }}
+            exit 1
+          fi
+          echo "✅ Processor build triggered (build ID: $BUILD_ID)"
 
   build-api:
     name: Build API
@@ -283,13 +304,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Submit Cloud Build
+      - name: Trigger Cloud Build
         run: |
-          gcloud builds submit \
-            --config=gcp/cloudbuild/cloudbuild-api.yaml \
+          BUILD_ID=$(gcloud builds triggers run build-api-manual \
+            --branch="${{ github.ref_name }}" \
             --project=${{ secrets.GCP_PROJECT }} \
-            --substitutions=BRANCH_NAME="${{ github.ref_name }},COMMIT_SHA=${{ github.sha }}"
-          echo "✅ API build submitted"
+            --format="value(metadata.build.id)" 2>/dev/null)
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Failed to trigger API build"
+            gcloud builds triggers run build-api-manual \
+              --branch="${{ github.ref_name }}" \
+              --project=${{ secrets.GCP_PROJECT }}
+            exit 1
+          fi
+          echo "✅ API build triggered (build ID: $BUILD_ID)"
 
   build-crawler:
     name: Build Crawler
@@ -310,13 +338,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Submit Cloud Build
+      - name: Trigger Cloud Build
         run: |
-          gcloud builds submit \
-            --config=gcp/cloudbuild/cloudbuild-crawler.yaml \
+          BUILD_ID=$(gcloud builds triggers run build-crawler-manual \
+            --branch="${{ github.ref_name }}" \
             --project=${{ secrets.GCP_PROJECT }} \
-            --substitutions=BRANCH_NAME="${{ github.ref_name }},COMMIT_SHA=${{ github.sha }}"
-          echo "✅ Crawler build submitted"
+            --format="value(metadata.build.id)" 2>/dev/null)
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Failed to trigger crawler build"
+            gcloud builds triggers run build-crawler-manual \
+              --branch="${{ github.ref_name }}" \
+              --project=${{ secrets.GCP_PROJECT }}
+            exit 1
+          fi
+          echo "✅ Crawler build triggered (build ID: $BUILD_ID)"
 
   build-migrator:
     name: Build Migrator
@@ -337,13 +372,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Submit Cloud Build
+      - name: Trigger Cloud Build
         run: |
-          gcloud builds submit \
-            --config=gcp/cloudbuild/cloudbuild-migrator.yaml \
+          BUILD_ID=$(gcloud builds triggers run build-migrator-manual \
+            --branch="${{ github.ref_name }}" \
             --project=${{ secrets.GCP_PROJECT }} \
-            --substitutions=BRANCH_NAME="${{ github.ref_name }},COMMIT_SHA=${{ github.sha }}"
-          echo "✅ Migrator build submitted"
+            --format="value(metadata.build.id)" 2>/dev/null)
+          if [ -z "$BUILD_ID" ]; then
+            echo "❌ Failed to trigger migrator build"
+            gcloud builds triggers run build-migrator-manual \
+              --branch="${{ github.ref_name }}" \
+              --project=${{ secrets.GCP_PROJECT }}
+            exit 1
+          fi
+          echo "✅ Migrator build triggered (build ID: $BUILD_ID)"
 
   wait-for-builds:
     name: Wait for Cloud Builds

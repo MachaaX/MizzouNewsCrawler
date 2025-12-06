@@ -5,6 +5,7 @@ Tests all three extraction methods (newspaper4k, BeautifulSoup, Selenium)
 and the intelligent field-level fallback system.
 """
 
+import copy
 import textwrap
 from datetime import datetime
 from unittest.mock import Mock, patch
@@ -112,6 +113,81 @@ def mock_webdriver():
 
 class TestContentExtractor:
     """Test suite for ContentExtractor class and all extraction methods."""
+
+    @pytest.fixture(autouse=True)
+    def reset_mcmetadata(self):
+        """Reset mcmetadata availability between tests that stub it."""
+        original_available = crawler_module.MCMETADATA_AVAILABLE
+        original_module = crawler_module.mcmetadata
+        yield
+        crawler_module.MCMETADATA_AVAILABLE = original_available
+        crawler_module.mcmetadata = original_module
+
+    def _install_mcmetadata_stub(self, monkeypatch, *, extract_result=None, error=None):
+        """Install a stub mcmetadata module for controlled responses."""
+
+        def _convert_final_payload(payload: dict) -> dict:
+            converted = {
+                "url": payload.get("url"),
+                "article_title": payload.get("title"),
+                "text_content": payload.get("content"),
+                "publication_date": payload.get("publish_date"),
+            }
+
+            metadata = payload.get("metadata", {}) or {}
+            if metadata.get("text_extraction_method"):
+                converted["text_extraction_method"] = metadata["text_extraction_method"]
+
+            mc_info = metadata.get("mcmetadata", {}) or {}
+            for key in ("normalized_url", "canonical_url", "language"):
+                if key in mc_info:
+                    converted[key] = mc_info[key]
+            if mc_info.get("stats"):
+                converted["stats"] = mc_info["stats"]
+
+            author = payload.get("author")
+            if author:
+                converted["authors"] = [author]
+
+            return converted
+
+        class FakeMcMetadataModule:
+            STAT_NAMES = ["fetch_duration", "text_duration"]
+
+            def extract(
+                self,
+                url,
+                html_text=None,
+                include_other_metadata=True,
+                stats_accumulator=None,
+            ):
+                if stats_accumulator is not None:
+                    for key in getattr(self, "STAT_NAMES", []):
+                        stats_accumulator[key] = stats_accumulator.get(key, 0) + 1
+
+                if error:
+                    raise error
+
+                if not extract_result:
+                    return {}
+
+                data = copy.deepcopy(extract_result)
+                has_mc_keys = any(
+                    key in data
+                    for key in (
+                        "article_title",
+                        "text_content",
+                        "publication_date",
+                        "authors",
+                    )
+                )
+                if not has_mc_keys:
+                    data = _convert_final_payload(data)
+
+                return data
+
+        monkeypatch.setattr(crawler_module, "MCMETADATA_AVAILABLE", True)
+        monkeypatch.setattr(crawler_module, "mcmetadata", FakeMcMetadataModule())
 
     @pytest.mark.parametrize(
         "url,expected_date",
@@ -356,6 +432,208 @@ class TestContentExtractor:
         assert methods.get("publish_date") == "beautifulsoup"
         fallback_info = metadata.get("fallbacks", {}).get("publish_date")
         assert fallback_info is None
+
+    def test_mcmetadata_provides_all_fields_no_fallbacks(
+        self,
+        extractor,
+        monkeypatch,
+    ):
+        self._install_mcmetadata_stub(
+            monkeypatch,
+            extract_result={
+                "url": "https://example.com/full",
+                "title": "MC Title With Substance",
+                "author": "MC Author",
+                "publish_date": "2025-12-05T08:00:00",
+                "content": "full content " * 20,
+                "metadata": {
+                    "extraction_method": "mcmetadata",
+                    "text_extraction_method": "readability",
+                    "mcmetadata": {
+                        "normalized_url": "https://example.com/full",
+                        "canonical_url": None,
+                        "language": "en",
+                        "stats": {"fetch_duration": 1.0, "text_duration": 1.0},
+                    },
+                    "meta_description": "mc desc",
+                },
+            },
+        )
+
+        monkeypatch.setattr(crawler_module, "NEWSPAPER_AVAILABLE", True)
+
+        called = {"newspaper": False, "beautifulsoup": False, "selenium": False}
+        missing_calls = []
+
+        original_missing = extractor._get_missing_fields
+
+        def record_missing(result):
+            fields = original_missing(result)
+            missing_calls.append(list(fields))
+            return fields
+
+        monkeypatch.setattr(extractor, "_get_missing_fields", record_missing)
+
+        def note_newspaper(*_args, **_kwargs):
+            called["newspaper"] = True
+            return {}
+
+        def note_beautifulsoup(*_args, **_kwargs):
+            called["beautifulsoup"] = True
+            return {}
+
+        def note_selenium(*_args, **_kwargs):
+            called["selenium"] = True
+            return {}
+
+        monkeypatch.setattr(extractor, "_extract_with_newspaper", note_newspaper)
+        monkeypatch.setattr(extractor, "_extract_with_beautifulsoup", note_beautifulsoup)
+        monkeypatch.setattr(extractor, "_extract_with_selenium", note_selenium)
+
+        extractor.use_mcmetadata = True
+
+        result = extractor.extract_content("https://example.com/full")
+
+        assert missing_calls[0] == []
+        assert result["title"] == "MC Title With Substance"
+        assert result["author"] == "MC Author"
+        assert result["content"].startswith("full content")
+        assert result["metadata"]["extraction_method"] == "mcmetadata"
+        methods = result["metadata"]["extraction_methods"]
+        assert methods["content"] == "mcmetadata"
+        assert methods["metadata"] == "mcmetadata"
+        mc_meta = result["metadata"].get("mcmetadata", {})
+        assert mc_meta["normalized_url"] == "https://example.com/full"
+        assert called == {"newspaper": False, "beautifulsoup": False, "selenium": False}
+
+    def test_mcmetadata_partial_falls_back_to_newspaper(
+        self,
+        extractor,
+        monkeypatch,
+    ):
+        self._install_mcmetadata_stub(
+            monkeypatch,
+            extract_result={
+                "url": "https://example.com/partial",
+                "title": "MC Title With Substance",
+                "author": None,
+                "publish_date": None,
+                "content": "",
+                "metadata": {
+                    "extraction_method": "mcmetadata",
+                    "text_extraction_method": "readability",
+                    "mcmetadata": {
+                        "normalized_url": "https://example.com/partial",
+                        "canonical_url": None,
+                        "language": "en",
+                        "stats": {"fetch_duration": 1.0, "text_duration": 1.0},
+                    },
+                },
+            },
+        )
+
+        monkeypatch.setattr(crawler_module, "NEWSPAPER_AVAILABLE", True)
+
+        def fake_newspaper(url, html=None):
+            assert url == "https://example.com/partial"
+            return {
+                "url": url,
+                "title": None,
+                "author": "Legacy Author",
+                "publish_date": "2025-12-05",
+                "content": "legacy content " * 10,
+                "metadata": {
+                    "http_status": 200,
+                    "extraction_method": "newspaper4k",
+                    "meta_description": "legacy",
+                },
+            }
+
+        call_order = []
+
+        def note_beautifulsoup(*_args, **_kwargs):
+            call_order.append("beautifulsoup")
+            return {}
+
+        def note_selenium(*_args, **_kwargs):
+            call_order.append("selenium")
+            return {}
+
+        extractor.use_mcmetadata = True
+        monkeypatch.setattr(extractor, "_extract_with_newspaper", fake_newspaper)
+        monkeypatch.setattr(extractor, "_extract_with_beautifulsoup", note_beautifulsoup)
+        monkeypatch.setattr(extractor, "_extract_with_selenium", note_selenium)
+
+        result = extractor.extract_content("https://example.com/partial")
+
+        assert result["title"] == "MC Title With Substance"
+        assert result["author"] == "Legacy Author"
+        assert result["publish_date"] == "2025-12-05"
+        assert result["metadata"]["extraction_method"] == "newspaper4k"
+        methods = result["metadata"]["extraction_methods"]
+        assert methods["title"] == "mcmetadata"
+        assert methods["author"] == "newspaper4k"
+        assert methods["publish_date"] == "newspaper4k"
+        assert methods["content"] == "newspaper4k"
+        assert call_order == []
+
+    def test_mcmetadata_failure_allows_legacy_pipeline(
+        self,
+        extractor,
+        monkeypatch,
+        mock_html_partial,
+    ):
+        class McMetadataBoom(Exception):
+            pass
+
+        self._install_mcmetadata_stub(monkeypatch, error=McMetadataBoom("boom"))
+
+        call_order = []
+
+        def fake_newspaper(url, html=None):
+            call_order.append("newspaper")
+            return {
+                "url": url,
+                "title": None,
+                "author": None,
+                "publish_date": None,
+                "content": None,
+                "metadata": {"extraction_method": "newspaper4k"},
+            }
+
+        def fake_beautifulsoup(url, html=None):
+            call_order.append("beautifulsoup")
+            assert html is None  # mcmetadata failure should not provide HTML override
+            return {
+                "url": url,
+                "title": "Fallback Title",
+                "author": "Fallback Author",
+                "publish_date": "2025-12-05T09:00:00",
+                "content": "fallback content " * 20,
+                "metadata": {
+                    "extraction_method": "beautifulsoup",
+                    "meta_description": "fallback",
+                },
+            }
+
+        def fail_selenium(*_args, **_kwargs):
+            call_order.append("selenium")
+            return {}
+
+        extractor.use_mcmetadata = True
+        monkeypatch.setattr(extractor, "_extract_with_newspaper", fake_newspaper)
+        monkeypatch.setattr(extractor, "_extract_with_beautifulsoup", fake_beautifulsoup)
+        monkeypatch.setattr(extractor, "_extract_with_selenium", fail_selenium)
+
+        result = extractor.extract_content("https://example.com/boom")
+
+        assert call_order == ["newspaper", "beautifulsoup"]
+        assert result["title"] == "Fallback Title"
+        assert result["metadata"]["extraction_method"] == "beautifulsoup"
+        methods = result["metadata"]["extraction_methods"]
+        assert methods["title"] == "beautifulsoup"
+        assert methods["content"] == "beautifulsoup"
+        assert methods["metadata"] == "beautifulsoup"
 
     def test_publish_date_detected_near_byline_text(self, extractor):
         content = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. " * 5

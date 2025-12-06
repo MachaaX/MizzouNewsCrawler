@@ -354,6 +354,7 @@ def test_handle_telemetry_fields_command(monkeypatch, capsys):
             "author_success_rate": 0.5,
             "content_success_rate": 0.8,
             "date_success_rate": 0.7,
+            "metadata_success_rate": 0.6,
             "count": 4,
         },
         {
@@ -362,6 +363,7 @@ def test_handle_telemetry_fields_command(monkeypatch, capsys):
             "author_success_rate": 0.3,
             "content_success_rate": 0.5,
             "date_success_rate": 0.4,
+            "metadata_success_rate": 0.2,
             "count": 2,
         },
     ]

@@ -60,6 +60,11 @@ WORK_QUEUE_URL = os.getenv(
 )
 USE_WORK_QUEUE = os.getenv("USE_WORK_QUEUE", "false").lower() == "true"
 
+ENABLE_MEDIACLOUD_WIRE_CHECK = (
+    os.getenv("ENABLE_WIRE_DETECTION", "true").lower() == "true"
+    and bool(os.getenv("MEDIACLOUD_API_TOKEN"))
+)
+
 
 class _PlaceholderNotFoundError(Exception):
     """Fallback exception until crawler dependencies are loaded."""
@@ -283,6 +288,15 @@ ARTICLE_UPDATE_SQL = text(
 )
 
 ARTICLE_STATUS_UPDATE_SQL = text("UPDATE articles SET status = :status WHERE id = :id")
+
+ARTICLE_MARK_WIRE_PENDING_SQL = text(
+    "UPDATE articles SET wire_check_status = 'pending', wire_check_attempted_at = NULL, "
+    "wire_check_error = NULL, wire_check_metadata = NULL WHERE id = :id"
+)
+
+ARTICLE_MARK_WIRE_COMPLETE_SQL = text(
+    "UPDATE articles SET wire_check_status = 'complete', wire_check_error = NULL WHERE id = :id"
+)
 
 
 def _format_cleaned_authors(authors):
@@ -1667,6 +1681,20 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                         new_status = "cleaned"
 
                     status_changed = new_status != current_status
+
+                    if status_changed and current_status == "extracted":
+                        if ENABLE_MEDIACLOUD_WIRE_CHECK and new_status == "cleaned":
+                            safe_session_execute(
+                                session,
+                                ARTICLE_MARK_WIRE_PENDING_SQL,
+                                {"id": article_id},
+                            )
+                        else:
+                            safe_session_execute(
+                                session,
+                                ARTICLE_MARK_WIRE_COMPLETE_SQL,
+                                {"id": article_id},
+                            )
 
                     article_updated = False
 

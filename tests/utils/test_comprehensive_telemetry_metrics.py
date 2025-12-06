@@ -57,6 +57,7 @@ def test_extraction_metrics_tracks_methods(monkeypatch):
     assert metrics.final_field_attribution["title"] == "primary"
     assert metrics.is_success is True
     assert metrics.content_length == len("Body")
+    assert metrics.field_extraction["primary"]["metadata"] is True
 
 
 @pytest.mark.postgres
@@ -307,6 +308,7 @@ def test_comprehensive_telemetry_aggregates():
     field_stats = telemetry.get_field_extraction_stats()
     primary_field = next(item for item in field_stats if item["method"] == "primary")
     assert primary_field["title_success_rate"] > 0
+    assert "metadata_success_rate" in primary_field
 
     filtered_field_stats = telemetry.get_field_extraction_stats(
         publisher="Publisher A",
@@ -454,6 +456,7 @@ def test_extraction_metrics_metadata_proxy_extraction():
     assert metrics.proxy_url == "http://proxy.test:8080"
     assert metrics.proxy_authenticated is True
     assert metrics.proxy_status == ct.PROXY_STATUS_SUCCESS
+    assert metrics.field_extraction["method1"]["metadata"] is True
 
 
 def test_extraction_metrics_finalize_empty_result():
@@ -472,6 +475,7 @@ def test_extraction_metrics_finalize_empty_result():
     assert metrics.extracted_fields["title"] is False
     assert metrics.extracted_fields["content"] is False
     assert metrics.is_success is False
+    assert metrics.extracted_fields["metadata"] is False
 
 
 def test_extraction_metrics_finalize_with_content():
@@ -508,6 +512,7 @@ def test_extraction_metrics_finalize_with_content():
     assert metrics.extracted_fields["publish_date"] is True
     assert metrics.final_field_attribution["title"] == "newspaper"
     assert metrics.final_field_attribution["author"] == "custom"
+    assert metrics.extracted_fields["metadata"] is True
 
 
 def test_extraction_metrics_record_alternative_extraction():

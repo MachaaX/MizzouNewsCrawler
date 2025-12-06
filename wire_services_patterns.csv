@@ -27,6 +27,7 @@ id,service_name,pattern,pattern_type,case_sensitive,priority,active
 15,Reuters,/reuters-,url,False,20,True
 47,Stacker,/stacker/,url,False,20,True
 46,Stacker,/stacker-,url,False,20,True
+50,Brandpoint,/brandpoint/,url,False,20,True
 16,Wire Service,/wire/,url,False,20,True
 3,Associated Press,apnews.com,url,False,25,True
 2,CNN,cnn.com,url,False,25,True

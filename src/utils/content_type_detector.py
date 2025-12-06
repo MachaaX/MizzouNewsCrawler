@@ -590,15 +590,26 @@ class ContentTypeDetector:
             # Extract publisher from URL (domain or callsign)
             publisher_indicators = self._extract_publisher_from_url(url_lower)
 
+            other_broadcaster = self._detect_cross_broadcaster_byline(
+                author_lower, publisher_indicators
+            )
+
             # Check if author contains publisher name
             byline_matches_publisher = any(
                 indicator in author_lower for indicator in publisher_indicators
             )
 
-            if byline_matches_publisher:
-                # Author matches publisher - this is LOCAL content
+            if byline_matches_publisher and not other_broadcaster:
+                # Author matches publisher with no other broadcaster credit
                 # Example: "KMIZ News" on abc17news.com (KMIZ's site)
                 return None
+
+            if other_broadcaster:
+                matches.setdefault("author", []).append(
+                    f"{other_broadcaster} (cross-broadcaster byline)"
+                )
+                detected_services.add(other_broadcaster)
+                byline_signal = True
 
             # Check author patterns from database (STRONGEST SIGNAL)
             # Loads patterns with pattern_type='author' for byline matching
@@ -646,7 +657,54 @@ class ContentTypeDetector:
             return self._build_wire_result(matches, detected_services, tier="byline")
 
         # ===================================================================
-        # TIER 3: Metadata/Copyright Analysis (STRONG SIGNAL)
+        # TIER 3: Metadata Field Analysis (STRONG SIGNAL)
+        # ===================================================================
+        metadata_signal = False
+
+        if metadata:
+            metadata_texts: list[str] = []
+
+            # Common description fields captured by extractors
+            description_keys = (
+                "meta_description",
+                "description",
+                "og:description",
+                "twitter:description",
+                "og_description",
+                "twitter_description",
+            )
+            for key in description_keys:
+                value = metadata.get(key)
+                if isinstance(value, str) and value.strip():
+                    metadata_texts.append(value)
+
+            keywords = metadata.get("keywords")
+            if isinstance(keywords, list):
+                for keyword in keywords:
+                    if isinstance(keyword, str) and keyword.strip():
+                        metadata_texts.append(keyword)
+
+            if metadata_texts:
+                # Reuse existing wire service patterns for metadata detection
+                metadata_patterns = self._get_wire_service_patterns(
+                    pattern_type="author"
+                ) + self._get_wire_service_patterns(pattern_type="content")
+
+                for text in metadata_texts:
+                    for pattern, service_name, case_sensitive in metadata_patterns:
+                        flags = 0 if case_sensitive else re.IGNORECASE
+                        if re.search(pattern, text, flags):
+                            matches.setdefault("metadata", []).append(
+                                f"{service_name} (metadata)"
+                            )
+                            detected_services.add(service_name)
+                            metadata_signal = True
+                            break
+                    if metadata_signal:
+                        break
+
+        # ===================================================================
+        # TIER 4: Metadata/Copyright Analysis (STRONG SIGNAL)
         # ===================================================================
         copyright_signal = False
 
@@ -722,7 +780,7 @@ class ContentTypeDetector:
         # Don't return yet - continue collecting evidence
 
         # ===================================================================
-        # TIER 4: Content Pattern Analysis (Check datelines, etc.)
+        # TIER 5: Content Pattern Analysis (Check datelines, etc.)
         # ===================================================================
         content_signal = False
 
@@ -789,6 +847,9 @@ class ContentTypeDetector:
         # Strong signals alone are sufficient
         if byline_signal:
             return self._build_wire_result(matches, detected_services, tier="byline")
+
+        if metadata_signal:
+            return self._build_wire_result(matches, detected_services, tier="metadata")
 
         if copyright_signal:
             return self._build_wire_result(matches, detected_services, tier="copyright")
@@ -870,6 +931,10 @@ class ContentTypeDetector:
 
         # Check if this callsign is in our local broadcasters database
         local_callsigns = self._get_local_broadcaster_callsigns()
+        if not local_callsigns:
+            local_callsigns = set(self._CALLSIGN_DOMAINS.keys())
+        if not local_callsigns:
+            local_callsigns = set(self._CALLSIGN_DOMAINS.keys())
         if callsign not in local_callsigns:
             # Unknown broadcaster - not in our local dataset
             # Don't flag as wire (could be out-of-market broadcaster)
@@ -893,6 +958,25 @@ class ContentTypeDetector:
 
         # URL belongs to different broadcaster - this is syndicated/wire
         return (callsign, True)
+
+    def _detect_cross_broadcaster_byline(
+        self, author_lower: str, publisher_indicators: Iterable[str]
+    ) -> str | None:
+        """Return callsign if byline credits a different local broadcaster."""
+
+        local_callsigns = self._get_local_broadcaster_callsigns()
+        publisher_set = {
+            indicator.strip() for indicator in publisher_indicators if indicator
+        }
+
+        for callsign in local_callsigns:
+            call_lower = callsign.lower()
+            if call_lower in author_lower:
+                if call_lower in publisher_set:
+                    continue
+                return callsign
+
+        return None
 
     def _detect_cross_publication_byline(
         self, content: str, url_lower: str
