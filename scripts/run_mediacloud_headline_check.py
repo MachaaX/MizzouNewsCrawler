@@ -78,7 +78,6 @@ def load_candidates(path: str) -> list[ArticleRecord]:
                     marker=marker,
                 )
             )
-def write_results(path: str, rows: list[dict], fieldnames: list[str]) -> None:
     return records
 
 
