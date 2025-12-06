@@ -372,12 +372,16 @@ class ContentExtractor:
 
         # MediaCloud metadata integration (feature-flagged)
         if use_mcmetadata is None:
-            use_mcmetadata = os.getenv("ENABLE_MCMETADATA", "").lower() in (
-                "1",
-                "true",
-                "yes",
-                "on",
-            )
+            env_value = os.getenv("ENABLE_MCMETADATA")
+            if env_value is None:
+                use_mcmetadata = True
+            else:
+                use_mcmetadata = env_value.lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
 
         self.use_mcmetadata = bool(use_mcmetadata)
         self.mcmetadata_include_other_metadata = os.getenv(

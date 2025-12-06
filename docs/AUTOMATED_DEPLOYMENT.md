@@ -404,6 +404,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --role="roles/iam.serviceAccountUser"
 ```
 
+**GitHub Actions cannot trigger Cloud Build:**
+```bash
+./scripts/grant-github-actions-permissions.sh --project mizzou-news-crawler
+
+# or run manually
+GITHUB_SA="github-actions@mizzou-news-crawler.iam.gserviceaccount.com"
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${GITHUB_SA}" \
+  --role="roles/cloudbuild.builds.editor"
+```
+
 ## Manual Deployment
 
 If you need to deploy manually (bypass triggers):
