@@ -6,40 +6,52 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, Protocol, cast
 from urllib.parse import urlparse
 
-_HAS_MEDIACLOUD = False
+
+class SearchApiProtocol(Protocol):
+    def story_list(
+        self, **kwargs: Any
+    ) -> tuple[list[dict], Any]:  # pragma: no cover - protocol definition
+        ...
+
+
+class _FallbackAPIResponseError(Exception):
+    """Fallback error used when mediacloud dependency is missing."""
+
+    status_code: int
+
+    def __init__(self, message: str = "", status_code: int = 0) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class _FallbackMCException(Exception):
+    """Fallback exception mirroring mediacloud.MCException."""
+
+    pass
+
+
+APIResponseError: type[_FallbackAPIResponseError] = _FallbackAPIResponseError
+MCException: type[_FallbackMCException] = _FallbackMCException
+_SearchApiFactory: Callable[[str], SearchApiProtocol] | None = None
+
 
 try:  # pragma: no cover - import guard exercised via unit tests
-    from mediacloud.api import SearchApi as _SearchApi
+    from mediacloud.api import SearchApi as _ImportedSearchApi
     from mediacloud.error import APIResponseError as _ImportedAPIResponseError
     from mediacloud.error import MCException as _ImportedMCException
 except (
     ModuleNotFoundError
 ):  # pragma: no cover - exercised in CI without dependency installed
-    _SearchApi = Any  # type: ignore[assignment]
-
-    class _FallbackAPIResponseError(RuntimeError):
-        """Fallback error used when mediacloud dependency is missing."""
-
-        def __init__(self, message: str, status_code: int | None = None) -> None:
-            super().__init__(message)
-            self.status_code = status_code or 0
-
-    class _FallbackMCException(RuntimeError):
-        """Fallback exception mirroring mediacloud.MCException."""
-
-        pass
-
-    APIResponseError = _FallbackAPIResponseError
-    MCException = _FallbackMCException
+    pass
 else:
-    _HAS_MEDIACLOUD = True
-    APIResponseError = _ImportedAPIResponseError
-    MCException = _ImportedMCException
-
-SearchApi = _SearchApi
+    APIResponseError = cast(
+        "type[_FallbackAPIResponseError]", _ImportedAPIResponseError
+    )
+    MCException = cast("type[_FallbackMCException]", _ImportedMCException)
+    _SearchApiFactory = _ImportedSearchApi  # type: ignore[assignment]
 
 
 class MissingDependencyError(RuntimeError):
@@ -189,7 +201,7 @@ class MediaCloudDetector:
 
     def __init__(
         self,
-        search_api: SearchApi,
+        search_api: SearchApiProtocol,
         *,
         rate_limiter: RateLimiter | None = None,
         logger: logging.Logger | None = None,
@@ -208,13 +220,14 @@ class MediaCloudDetector:
     ) -> MediaCloudDetector:
         if not token:
             raise ValueError("MediaCloud API token is required")
-        if not _HAS_MEDIACLOUD:
+        factory = _SearchApiFactory
+        if factory is None:
             raise MissingDependencyError(
                 "The 'mediacloud' package is not installed. Install the optional dependency "
                 "with `pip install mediacloud` to enable MediaCloud detectors."
             )
         try:
-            search_api = SearchApi(token)
+            search_api = factory(token)
         except MCException as exc:  # pragma: no cover - constructor rarely fails
             raise RuntimeError(
                 f"Failed to initialise MediaCloud client: {exc}"
