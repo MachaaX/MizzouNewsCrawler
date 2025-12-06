@@ -12,6 +12,7 @@ from .mediacloud import (
     build_query,
     normalize_host,
     parse_iso8601,
+    resolve_api_token,
     summarize_matches,
 )
 
@@ -24,6 +25,7 @@ __all__ = [
     "MediaCloudArticle",
     "MediaCloudDetector",
     "RateLimiter",
+    "resolve_api_token",
     "build_query",
     "normalize_host",
     "parse_iso8601",

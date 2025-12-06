@@ -15,6 +15,10 @@ selenium>=4.10.0
 undetected-chromedriver>=3.5.0
 selenium-stealth>=1.0.6
 
+# MediaCloud headline detection stack
+mediacloud>=3.3.0
+mediacloud-metadata>=0.6.0
+
 # Data export and analytics
 google-cloud-bigquery[pandas]>=3.13.0  # BigQuery export for analytics pipeline
 cloud-sql-python-connector[pg8000]>=1.11.0  # Cloud SQL connector for database access
