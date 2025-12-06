@@ -2,6 +2,7 @@ import collections
 import logging
 import re
 from abc import ABC, abstractmethod
+from typing import Any, cast
 
 import dateparser
 import lxml.etree
@@ -56,7 +57,9 @@ METHOD_OVERRIDEN = "overriden"
 method_success_stats = collections.Counter()
 
 
-def from_html(url: str, html_text: str, include_metadata: bool = False) -> dict:
+def from_html(
+    url: str, html_text: str, include_metadata: bool = False
+) -> dict[str, Any]:
     """
     Try a series of extractors to pull content out of HTML. The idea is to try as hard as can to get
     good content, but fallback to at least get something useful. The writeup at this site was very helpful:
@@ -72,12 +75,20 @@ def from_html(url: str, html_text: str, include_metadata: bool = False) -> dict:
 
         try:
             # logger.debug("Trying {}".format(extractor_info['method']))
-            extractor = extractor_info["instance"]
+            extractor = cast(AbstractExtractor, extractor_info["instance"])
             extractor.extract(url, html_text, include_metadata)
             if extractor.worked():
-                method_success_stats[extractor.content["extraction_method"]] += 1
-                extractor.content["text"] = extractor.content["text"].strip()
-                return extractor.content
+                content = extractor.content
+                if content is None:
+                    continue
+                extraction_method = content.get("extraction_method")
+                if not isinstance(extraction_method, str):
+                    extraction_method = METHOD_FAILED
+                method_success_stats[extraction_method] += 1
+                text_value = content.get("text")
+                if isinstance(text_value, str):
+                    content["text"] = text_value.strip()
+                return content
         except BadContentError as e:
             raise e
         except Exception:
@@ -94,7 +105,7 @@ class AbstractExtractor(ABC):
     """
 
     def __init__(self):
-        self.content = None
+        self.content: dict[str, Any] | None = None
 
     @abstractmethod
     def extract(self, url: str, html_text: str, include_metadata: bool = False):
@@ -317,13 +328,13 @@ class LxmlExtractor(AbstractExtractor):
 
 
 # based by findings from trafilatura paper, but customized to performance on EN and ES sources (see tests)
-extractors = [
-    dict(method=METHOD_TRAFILATURA, instance=TrafilaturaExtractor()),
-    dict(method=METHOD_READABILITY, instance=ReadabilityExtractor()),
-    dict(method=METHOD_BOILER_PIPE_3, instance=BoilerPipe3Extractor()),
-    dict(method=METHOD_GOOSE_3, instance=GooseExtractor()),
-    dict(method=METHOD_NEWSPAPER_3k, instance=Newspaper3kExtractor()),
+extractors: list[dict[str, Any]] = [
+    {"method": METHOD_TRAFILATURA, "instance": TrafilaturaExtractor()},
+    {"method": METHOD_READABILITY, "instance": ReadabilityExtractor()},
+    {"method": METHOD_BOILER_PIPE_3, "instance": BoilerPipe3Extractor()},
+    {"method": METHOD_GOOSE_3, "instance": GooseExtractor()},
+    {"method": METHOD_NEWSPAPER_3k, "instance": Newspaper3kExtractor()},
     # this one should never fail (if there is any content at all) because it just parses HTML
-    dict(method=METHOD_BEAUTIFUL_SOUP_4, instance=RawHtmlExtractor()),
-    dict(method=METHOD_LXML, instance=LxmlExtractor()),
+    {"method": METHOD_BEAUTIFUL_SOUP_4, "instance": RawHtmlExtractor()},
+    {"method": METHOD_LXML, "instance": LxmlExtractor()},
 ]

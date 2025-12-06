@@ -67,6 +67,8 @@ def canonical_domain(raw_url: str) -> str:
         pass
 
     url = normalize_url(raw_url)
+    if not url:
+        return ""
     parsed_domain = tldextract.extract(url)
 
     # treat certain domains differently
@@ -203,10 +205,11 @@ def _remove_query_params(url: str) -> str:
         # Delete the "empty" parameter (e.g. in http://www-nc.nytimes.com/2011/06/29/us/politics/29marriage.html?=_r%3D6)
         "",
     ]
-    if "facebook.com" in uri.host.lower():
+    host = (uri.host or "").lower()
+    if "facebook.com" in host:
         # Additional parameters specifically for the facebook.com host
         parameters_to_remove += ["ref", "fref", "hc_location"]
-    if "nytimes.com" in uri.host.lower():
+    if "nytimes.com" in host:
         # Additional parameters specifically for the nytimes.com host
         parameters_to_remove += [
             "emc",
@@ -295,7 +298,10 @@ def normalize_url(url: str) -> Optional[str]:
         return None
     if len(url) == 0:
         return None
-    url = _fix_common_url_mistakes(url)
+    fixed_url = _fix_common_url_mistakes(url)
+    if not fixed_url:
+        return None
+    url = fixed_url
     url = _remove_port_from_url(url)
     if yt_generic_pattern.match(url):  # YouTube URLs video IDs are case sensitive
         url = normalize_youtube_url(url)

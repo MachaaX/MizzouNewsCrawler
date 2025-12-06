@@ -2,7 +2,7 @@ import datetime as dt
 import importlib.metadata
 import logging
 import time
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Mapping, MutableMapping, Optional, cast
 
 from . import content, dates, languages, titles, urls, webpages
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 MAX_FUTURE_PUB_DATE = 90
 
 STAT_NAMES = ["total", "fetch", "url", "pub_date", "content", "title", "language"]
-stats = dict.fromkeys(STAT_NAMES, 0)
+stats: dict[str, float] = cast(dict[str, float], dict.fromkeys(STAT_NAMES, 0.0))
 
 # from https://github.com/counterdata-network/story-processor/blob/03f6de5dfdb69f6d3ae26972844b62eaf8f0f39d/processor/__init__.py#L49C1-L56C2
 LOGGERS_IGNORE_INFO = [
@@ -46,7 +46,7 @@ def extract(
     include_other_metadata: Optional[bool] = False,
     defaults: Mapping[str, Any] = {},
     overrides: Mapping[str, Any] = {},
-    stats_accumulator: Mapping[str, int] = None,
+    stats_accumulator: MutableMapping[str, float] | None = None,
 ) -> dict:
     """
     The core method of this library - returns all the useful information extracted from the HTML of the next
@@ -73,7 +73,10 @@ def extract(
     if (
         stats_accumulator is None
     ):  # can't default to global because of Python reference handling in defaults
-        stats_accumulator = stats
+        accumulator: MutableMapping[str, float] = stats
+    else:
+        accumulator = stats_accumulator
+    use_other_metadata = bool(include_other_metadata)
     t0 = time.monotonic()
     # first fetch the real content (if we need to)
     t1 = t0
@@ -97,7 +100,7 @@ def extract(
         )
         raw_html = html_text
     fetch_duration = time.monotonic() - t1
-    stats_accumulator["fetch"] += fetch_duration
+    accumulator["fetch"] += fetch_duration
 
     # url
     t1 = time.monotonic()
@@ -105,7 +108,7 @@ def extract(
     is_homepage_url = urls.is_homepage_url(url)
     is_shortened_url = urls.is_shortened_url(url)
     url_duration = time.monotonic() - t1
-    stats_accumulator["url"] += url_duration
+    accumulator["url"] += url_duration
 
     if "canonical_domain" in overrides:
         canonical_domain = overrides["canonical_domain"]
@@ -123,7 +126,7 @@ def extract(
             raw_html, final_url, max_date=max_pub_date, default_date=default_date
         )
     pub_date_duration = time.monotonic() - t1
-    stats_accumulator["pub_date"] += pub_date_duration
+    accumulator["pub_date"] += pub_date_duration
 
     # content
     t1 = time.monotonic()
@@ -132,9 +135,9 @@ def extract(
             extraction_method=content.METHOD_OVERRIDEN, text=overrides["text_content"]
         )
     else:
-        article = content.from_html(final_url, raw_html, include_other_metadata)
+        article = content.from_html(final_url, raw_html, use_other_metadata)
     content_duration = time.monotonic() - t1
-    stats_accumulator["content"] += content_duration
+    accumulator["content"] += content_duration
 
     # title
     t1 = time.monotonic()
@@ -146,7 +149,7 @@ def extract(
             article_title = defaults.get("article_title") if defaults else None
     normalized_title = titles.normalize_title(article_title)
     title_duration = time.monotonic() - t1
-    stats_accumulator["title"] += title_duration
+    accumulator["title"] += title_duration
 
     # language
     t1 = time.monotonic()
@@ -159,7 +162,7 @@ def extract(
         if full_language is None:
             full_language = defaults.get("language") if defaults else None
     language_duration = time.monotonic() - t1
-    stats_accumulator["language"] += language_duration
+    accumulator["language"] += language_duration
 
     # canonical url
     if "canonical_url" in overrides:
@@ -168,7 +171,7 @@ def extract(
         canonical_url = article.get("canonical_url")
 
     total_duration = time.monotonic() - t0
-    stats_accumulator["total"] += total_duration
+    accumulator["total"] += total_duration
 
     results = dict(
         original_url=url,
@@ -190,7 +193,7 @@ def extract(
         is_shortened=is_shortened_url,
         version=__version__,
     )
-    if include_other_metadata:
+    if use_other_metadata:
         # other metadata we've done less robust validation on, but might be useful
         results["other"] = dict(
             raw_title=article["title"] if "title" in article else None,
@@ -210,7 +213,7 @@ def extract(
 
 def reset_stats():
     global stats
-    stats = dict.fromkeys(STAT_NAMES, 0)
+    stats = cast(dict[str, float], dict.fromkeys(STAT_NAMES, 0.0))
 
 
 def ignore_loggers() -> None:

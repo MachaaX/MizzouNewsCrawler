@@ -26,7 +26,7 @@ def guess_publication_date(
                 pub_date = None
     except Exception:
         # if there is no date found, or it is in a format that can't be parsed, ignore and just keep going
-        logger.error("Publication date parsing failed", exc_info=1)
+        logger.error("Publication date parsing failed", exc_info=True)
     if (pub_date is None) and (default_date is not None):
         pub_date = default_date
     return pub_date

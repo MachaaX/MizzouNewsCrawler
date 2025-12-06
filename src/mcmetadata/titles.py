@@ -121,7 +121,7 @@ def from_html(
             title = h1_title
 
     # optionally trim to a max length
-    if trim_to_length > 0:
+    if trim_to_length > 0 and title:
         title = title[0:trim_to_length]
 
     # strip again here because there might be dangling spaces from prefix/suffix cleaning
