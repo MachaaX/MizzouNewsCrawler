@@ -52,8 +52,8 @@ try:  # pragma: no cover - optional dependency we want to check at runtime
 	import mcmetadata
 except ModuleNotFoundError as exc:  # pragma: no cover - handled at runtime
 	raise SystemExit(
-		"mcmetadata is required for this benchmark. Install with "
-		"`pip install mediacloud-metadata` or add it to your environment."
+		"mcmetadata is required for this benchmark. Run from the repository root "
+		"(vendored package) or install `mediacloud-metadata` manually."
 	) from exc
 
 

@@ -17,7 +17,8 @@ selenium-stealth>=1.0.6
 
 # MediaCloud headline detection stack
 mediacloud>=3.3.0
-mediacloud-metadata>=0.6.0
+# mcmetadata vendored in src/mcmetadata; ensure runtime dependency available for extraction
+newspaper4k>=0.9.4.1
 
 # Data export and analytics
 google-cloud-bigquery[pandas]>=3.13.0  # BigQuery export for analytics pipeline
