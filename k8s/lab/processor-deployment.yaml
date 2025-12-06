@@ -57,6 +57,10 @@ spec:
           value: "true"
         - name: CLOUD_SQL_INSTANCE
           value: "mizzou-news-crawler:us-central1:mizzou-db-prod"
+        - name: MEDIACLOUD_SECRET_NAME
+          value: "mediacloud-api-token"
+        - name: GOOGLE_CLOUD_PROJECT
+          value: "mizzou-news-crawler"
         - name: POLL_INTERVAL
           value: "60"
         - name: VERIFICATION_BATCH_SIZE

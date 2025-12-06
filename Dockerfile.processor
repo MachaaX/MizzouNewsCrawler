@@ -22,6 +22,7 @@ RUN chown -R appuser:appuser /app
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser orchestration/ ./orchestration/
 COPY --chown=appuser:appuser scripts/ ./scripts/
+COPY --chown=appuser:appuser sitecustomize.py ./sitecustomize.py
 
 # Create data and lookups directories (models already in ml-base)
 RUN mkdir -p /app/data /app/lookups && chown -R appuser:appuser /app/data /app/lookups
