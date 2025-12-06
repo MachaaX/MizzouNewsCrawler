@@ -8,6 +8,7 @@ import logging
 import os
 import random
 import re
+import sys
 import threading
 import time
 from copy import deepcopy
@@ -15,6 +16,8 @@ from datetime import datetime
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
+
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -50,6 +53,7 @@ except ImportError:
 
 # MediaCloud metadata extractor
 mcmetadata: ModuleType | None
+MCMETADATA_AVAILABLE = False
 try:
     import mcmetadata as mcmetadata_module
 
@@ -57,8 +61,18 @@ try:
     MCMETADATA_AVAILABLE = True
 except ImportError:
     mcmetadata = None
-    MCMETADATA_AVAILABLE = False
-    logging.warning("mcmetadata not available, mcmetadata extraction disabled")
+    try:
+        src_root = Path(__file__).resolve().parents[1]
+        src_str = os.fspath(src_root)
+        if src_str not in sys.path:
+            sys.path.insert(0, src_str)
+
+        import mcmetadata as mcmetadata_module
+
+        mcmetadata = mcmetadata_module
+        MCMETADATA_AVAILABLE = True
+    except ImportError:
+        logging.warning("mcmetadata not available, mcmetadata extraction disabled")
 
 # Cloudscraper for Cloudflare bypass
 try:
