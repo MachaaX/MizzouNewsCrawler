@@ -26,13 +26,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from mediacloud.error import APIResponseError, MCException
-
 from src.services.wire_detection import (
+    APIResponseError,
     DEFAULT_RATE_PER_MINUTE,
     DetectionResult,
+    MCException,
     MediaCloudArticle,
     MediaCloudDetector,
+    MissingDependencyError,
     normalize_host,
     parse_iso8601,
 )
@@ -106,6 +107,9 @@ def run(args: argparse.Namespace) -> int:
             user_info.get("username"),
             user_info.get("roles"),
         )
+    except MissingDependencyError as exc:
+        LOG.error("%s", exc)
+        return 1
     except MCException as exc:
         LOG.error("Failed to initialize MediaCloud API client: %s", exc)
         return 1

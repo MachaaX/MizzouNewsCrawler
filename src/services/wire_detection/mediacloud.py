@@ -6,11 +6,39 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
 
-from mediacloud.api import SearchApi
-from mediacloud.error import APIResponseError, MCException
+try:  # pragma: no cover - import guard exercised via unit tests
+    from mediacloud.api import SearchApi
+    from mediacloud.error import APIResponseError as _APIResponseError
+    from mediacloud.error import MCException as _MCException
+    _HAS_MEDIACLOUD = True
+except ModuleNotFoundError:  # pragma: no cover - exercised in CI without dependency installed
+    SearchApi = Any  # type: ignore[assignment]
+    _HAS_MEDIACLOUD = False
+
+    class _APIResponseError(RuntimeError):
+        """Fallback error used when mediacloud dependency is missing."""
+
+        def __init__(self, message: str, status_code: int | None = None) -> None:
+            super().__init__(message)
+            self.status_code = status_code or 0
+
+    class _MCException(RuntimeError):
+        """Fallback exception mirroring mediacloud.MCException."""
+
+        pass
+
+
+APIResponseError = _APIResponseError
+MCException = _MCException
+
+
+class MissingDependencyError(RuntimeError):
+    """Raised when the mediacloud client library is not installed."""
+
+    pass
 
 DEFAULT_RATE_PER_MINUTE = 2.0
 LOG = logging.getLogger(__name__)
@@ -172,6 +200,11 @@ class MediaCloudDetector:
     ) -> MediaCloudDetector:
         if not token:
             raise ValueError("MediaCloud API token is required")
+        if not _HAS_MEDIACLOUD:
+            raise MissingDependencyError(
+                "The 'mediacloud' package is not installed. Install the optional dependency "
+                "with `pip install mediacloud` to enable MediaCloud detectors."
+            )
         try:
             search_api = SearchApi(token)
         except MCException as exc:  # pragma: no cover - constructor rarely fails
