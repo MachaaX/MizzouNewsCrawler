@@ -255,11 +255,16 @@ def _get_content_type_detector() -> ContentTypeDetector:
     return _CONTENT_TYPE_DETECTOR
 
 
+DEFAULT_WIRE_CHECK_STATUS = "pending"
+
+
 ARTICLE_INSERT_SQL = text(
     "INSERT INTO articles (id, candidate_link_id, url, title, author, "
-    "publish_date, content, text, status, metadata, wire, extracted_at, "
+    "publish_date, content, text, status, metadata, wire, wire_check_status, "
+    "wire_check_attempted_at, wire_check_error, wire_check_metadata, extracted_at, "
     "created_at, text_hash) VALUES (:id, :candidate_link_id, :url, :title, "
     ":author, :publish_date, :content, :text, :status, :metadata, :wire, "
+    ":wire_check_status, :wire_check_attempted_at, :wire_check_error, :wire_check_metadata, "
     ":extracted_at, :created_at, :text_hash) "
     # Avoid specifying a conflict target here (ON CONFLICT (url) ...) if the
     # corresponding unique constraint may not exist in some deployments. Using
@@ -1257,6 +1262,10 @@ def _process_batch(
                             "status": article_status,
                             "metadata": json.dumps(content.get("metadata", {})),
                             "wire": wire_service_info,
+                            "wire_check_status": DEFAULT_WIRE_CHECK_STATUS,
+                            "wire_check_attempted_at": None,
+                            "wire_check_error": None,
+                            "wire_check_metadata": None,
                             "extracted_at": now.isoformat(),
                             "created_at": now.isoformat(),
                             "text_hash": text_hash,
