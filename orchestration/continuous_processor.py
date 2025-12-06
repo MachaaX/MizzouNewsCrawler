@@ -30,7 +30,16 @@ from src.services.wire_detection import (
     DEFAULT_RATE_PER_MINUTE,
     MediaCloudArticle,
     MediaCloudDetector,
+    resolve_api_token,
 )
+
+# In containerized environments (GKE/Cloud Run), platform adds timestamps.
+# Use simple format to avoid duplication in logs.
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Configuration from environment
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))  # seconds
@@ -59,22 +68,14 @@ MEDIACLOUD_RATE_PER_MINUTE = float(
     os.getenv("MEDIACLOUD_RATE_PER_MINUTE", str(DEFAULT_RATE_PER_MINUTE))
 )
 _WIRE_ENV_ENABLED = os.getenv("ENABLE_WIRE_DETECTION", "true").lower() == "true"
-_MEDIACLOUD_TOKEN = os.getenv("MEDIACLOUD_API_TOKEN")
+_MEDIACLOUD_TOKEN = resolve_api_token(logger=logger)
 ENABLE_WIRE_DETECTION = bool(_WIRE_ENV_ENABLED and _MEDIACLOUD_TOKEN)
 WIRE_DETECTION_ALLOWED_STATUSES = ("cleaned", "classified")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLI_MODULE = "src.cli.cli_modular"
 
-# In containerized environments (GKE/Cloud Run), platform adds timestamps.
-# Use simple format to avoid duplication in logs.
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(levelname)s] %(message)s",
-)
-logger = logging.getLogger(__name__)
-
-if _WIRE_ENV_ENABLED and not _MEDIACLOUD_TOKEN:
+if _WIRE_ENV_ENABLED and not ENABLE_WIRE_DETECTION:
     logger.warning(
         "MediaCloud wire detection disabled: ENABLE_WIRE_DETECTION=true but MEDIACLOUD_API_TOKEN not set"
     )

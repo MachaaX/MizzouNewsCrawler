@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -62,6 +63,102 @@ class MissingDependencyError(RuntimeError):
 
 DEFAULT_RATE_PER_MINUTE = 2.0
 LOG = logging.getLogger(__name__)
+_TOKEN_INITIALISED = False
+_RESOLVED_TOKEN: Optional[str] = None
+
+
+def _first_nonempty_env(keys: Iterable[str]) -> Optional[str]:
+    for key in keys:
+        value = os.getenv(key)
+        if value:
+            stripped = value.strip()
+            if stripped:
+                return stripped
+    return None
+
+
+def resolve_api_token(
+    *,
+    env_var: str = "MEDIACLOUD_API_TOKEN",
+    secret_env_keys: tuple[str, ...] = (
+        "MEDIACLOUD_SECRET_NAME",
+        "MEDIACLOUD_API_SECRET_NAME",
+    ),
+    project_env_keys: tuple[str, ...] = (
+        "GCP_PROJECT",
+        "GOOGLE_CLOUD_PROJECT",
+        "GCLOUD_PROJECT",
+    ),
+    logger: logging.Logger | None = None,
+) -> Optional[str]:
+    """Resolve the MediaCloud API token from environment or Secret Manager."""
+
+    log = logger or LOG
+
+    global _TOKEN_INITIALISED, _RESOLVED_TOKEN
+
+    if _TOKEN_INITIALISED:
+        return _RESOLVED_TOKEN
+
+    token: Optional[str] = None
+
+    existing = os.getenv(env_var)
+    if existing and existing.strip():
+        token = existing.strip()
+    else:
+        secret_name = _first_nonempty_env(secret_env_keys)
+        if secret_name:
+            try:
+                from google.cloud import secretmanager  # type: ignore
+            except Exception as exc:  # pragma: no cover - optional dependency
+                log.warning(
+                    "MediaCloud secret configured via %s but google-cloud-secret-manager is unavailable: %s",
+                    ", ".join(secret_env_keys),
+                    exc,
+                )
+            else:
+                resource_name = secret_name
+                if "/" not in resource_name:
+                    project = _first_nonempty_env(project_env_keys)
+                    if not project:
+                        log.warning(
+                            "MediaCloud secret '%s' configured but project env (%s) not set",
+                            secret_name,
+                            ", ".join(project_env_keys),
+                        )
+                        resource_name = ""
+                    else:
+                        resource_name = (
+                            f"projects/{project}/secrets/{secret_name}/versions/latest"
+                        )
+
+                if resource_name:
+                    try:
+                        client = secretmanager.SecretManagerServiceClient()
+                        response = client.access_secret_version(
+                            request={"name": resource_name}
+                        )
+                        candidate = response.payload.data.decode("utf-8").strip()
+                        if candidate:
+                            token = candidate
+                        else:
+                            log.warning(
+                                "MediaCloud secret '%s' returned an empty payload",
+                                resource_name,
+                            )
+                    except Exception as exc:  # pragma: no cover - network/API failure
+                        log.error(
+                            "Failed to load MediaCloud API token from Secret Manager '%s': %s",
+                            resource_name,
+                            exc,
+                        )
+
+    if token:
+        os.environ.setdefault(env_var, token)
+
+    _RESOLVED_TOKEN = token
+    _TOKEN_INITIALISED = True
+    return _RESOLVED_TOKEN
 
 
 @dataclass

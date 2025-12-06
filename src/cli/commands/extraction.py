@@ -28,6 +28,7 @@ from src.models.database import (
     safe_session_execute,
     save_article_entities,
 )
+from src.services.wire_detection import resolve_api_token
 
 # Lazy import: entity_extraction only needed for entity-extraction command
 # Importing at top level causes ModuleNotFoundError in crawler image (no rapidfuzz)
@@ -60,9 +61,10 @@ WORK_QUEUE_URL = os.getenv(
 )
 USE_WORK_QUEUE = os.getenv("USE_WORK_QUEUE", "false").lower() == "true"
 
+_MEDIACLOUD_TOKEN = resolve_api_token()
 ENABLE_MEDIACLOUD_WIRE_CHECK = os.getenv(
     "ENABLE_WIRE_DETECTION", "true"
-).lower() == "true" and bool(os.getenv("MEDIACLOUD_API_TOKEN"))
+).lower() == "true" and bool(_MEDIACLOUD_TOKEN)
 
 
 class _PlaceholderNotFoundError(Exception):
