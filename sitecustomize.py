@@ -29,7 +29,7 @@ def _ensure_newspaper_cache_directory() -> None:
             cache_dir = os.path.join(tempfile.gettempdir(), "newspaper_cache")
 
     path_str = os.fspath(cache_dir)
-    setattr(settings, "CACHE_DIRECTORY", path_str)
+    settings.CACHE_DIRECTORY = path_str
 
     try:
         os.makedirs(path_str, exist_ok=True)

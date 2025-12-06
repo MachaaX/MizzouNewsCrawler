@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 MAX_FUTURE_PUB_DATE = 90
 
 STAT_NAMES = ["total", "fetch", "url", "pub_date", "content", "title", "language"]
-stats = {s: 0 for s in STAT_NAMES}
+stats = dict.fromkeys(STAT_NAMES, 0)
 
 # from https://github.com/counterdata-network/story-processor/blob/03f6de5dfdb69f6d3ae26972844b62eaf8f0f39d/processor/__init__.py#L49C1-L56C2
 LOGGERS_IGNORE_INFO = [
@@ -47,7 +47,7 @@ def extract(
     defaults: Mapping[str, Any] = {},
     overrides: Mapping[str, Any] = {},
     stats_accumulator: Mapping[str, int] = None,
-) -> Dict:
+) -> dict:
     """
     The core method of this library - returns all the useful information extracted from the HTML of the next
     article at the supplied URL.
@@ -210,7 +210,7 @@ def extract(
 
 def reset_stats():
     global stats
-    stats = {s: 0 for s in STAT_NAMES}
+    stats = dict.fromkeys(STAT_NAMES, 0)
 
 
 def ignore_loggers() -> None:

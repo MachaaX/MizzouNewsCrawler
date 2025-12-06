@@ -2,7 +2,6 @@ import collections
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Dict
 
 import dateparser
 import lxml.etree
@@ -57,7 +56,7 @@ METHOD_OVERRIDEN = "overriden"
 method_success_stats = collections.Counter()
 
 
-def from_html(url: str, html_text: str, include_metadata: bool = False) -> Dict:
+def from_html(url: str, html_text: str, include_metadata: bool = False) -> dict:
     """
     Try a series of extractors to pull content out of HTML. The idea is to try as hard as can to get
     good content, but fallback to at least get something useful. The writeup at this site was very helpful:
@@ -240,7 +239,7 @@ class RawHtmlExtractor(AbstractExtractor):
     }
 
     def __init__(self):
-        super(RawHtmlExtractor, self).__init__()
+        super().__init__()
 
     def extract(self, url: str, html_text: str, include_metadata: bool = False):
         soup = BeautifulSoup(html_text, "lxml")
@@ -248,7 +247,7 @@ class RawHtmlExtractor(AbstractExtractor):
         output = ""
         for t in text:
             if t.parent.name not in self.REMOVE_LIST:
-                output += "{} ".format(t)
+                output += f"{t} "
 
         can_url = None
         if can_link := soup.find("link", rel="canonical"):

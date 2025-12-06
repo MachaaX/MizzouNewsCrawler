@@ -54,9 +54,7 @@ def _pick_between_languages(
             return indication
         # Prefer the detected language if both are set, because the indication often comes from an unconfiured CMS
         # This happens a lot in non-english langauges
-        logger.debug(
-            "Language mismatch - indicated {} but guessed {}".format(indication, guess)
-        )
+        logger.debug(f"Language mismatch - indicated {indication} but guessed {guess}")
         return guess
     elif (indication is None) and (guess is not None):
         return guess

@@ -22,9 +22,7 @@ def guess_publication_date(
         if pub_date_str:
             pub_date = dateparser.parse(pub_date_str)
             if max_date and (pub_date > max_date):  # double check for safety
-                logger.warning(
-                    "Ignore date as after max - {} > {}".format(pub_date, max_date)
-                )
+                logger.warning(f"Ignore date as after max - {pub_date} > {max_date}")
                 pub_date = None
     except Exception:
         # if there is no date found, or it is in a format that can't be parsed, ignore and just keep going

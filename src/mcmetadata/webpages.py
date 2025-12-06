@@ -36,9 +36,7 @@ def fetch(
     )
     if response.status_code != 200:
         raise RuntimeError(
-            "Webpage didn't return content ({}) from {}".format(
-                response.status_code, url
-            )
+            f"Webpage didn't return content ({response.status_code}) from {url}"
         )
     if ("content-type" in response.headers) and (
         "text/html" not in response.headers["content-type"]
