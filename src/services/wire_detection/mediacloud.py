@@ -12,27 +12,34 @@ from urllib.parse import urlparse
 _HAS_MEDIACLOUD = False
 
 try:  # pragma: no cover - import guard exercised via unit tests
-    from mediacloud.api import SearchApi
-    from mediacloud.error import APIResponseError, MCException
+    from mediacloud.api import SearchApi as _SearchApi
+    from mediacloud.error import APIResponseError as _ImportedAPIResponseError
+    from mediacloud.error import MCException as _ImportedMCException
 except (
     ModuleNotFoundError
 ):  # pragma: no cover - exercised in CI without dependency installed
-    SearchApi = Any  # type: ignore[assignment]
+    _SearchApi = Any  # type: ignore[assignment]
 
-    class APIResponseError(RuntimeError):
+    class _FallbackAPIResponseError(RuntimeError):
         """Fallback error used when mediacloud dependency is missing."""
 
         def __init__(self, message: str, status_code: int | None = None) -> None:
             super().__init__(message)
             self.status_code = status_code or 0
 
-    class MCException(RuntimeError):
+    class _FallbackMCException(RuntimeError):
         """Fallback exception mirroring mediacloud.MCException."""
 
         pass
 
+    APIResponseError = _FallbackAPIResponseError
+    MCException = _FallbackMCException
 else:
     _HAS_MEDIACLOUD = True
+    APIResponseError = _ImportedAPIResponseError
+    MCException = _ImportedMCException
+
+SearchApi = _SearchApi
 
 
 class MissingDependencyError(RuntimeError):
