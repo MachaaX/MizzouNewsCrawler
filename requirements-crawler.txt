@@ -12,8 +12,8 @@ undetected-chromedriver>=3.5.0  # Advanced anti-detection
 selenium-stealth>=1.0.6  # Browser fingerprint masking
 
 # Article extraction
-newspaper4k>=0.9.2  # Use newspaper4k (modern fork)
-mediacloud-metadata>=0.6.0  # MediaCloud extraction pipeline
+newspaper4k>=0.9.4.1  # Use newspaper4k (modern fork)
+# mcmetadata package vendored in src/mcmetadata
 feedparser>=6.0.10
 
 # MediaCloud integration for headline duplication checks

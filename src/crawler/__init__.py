@@ -12,6 +12,7 @@ import threading
 import time
 from copy import deepcopy
 from datetime import datetime
+from types import ModuleType
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -48,9 +49,11 @@ except ImportError:
     logging.warning("newspaper4k not available, falling back to BeautifulSoup only")
 
 # MediaCloud metadata extractor
+mcmetadata: ModuleType | None
 try:
-    import mcmetadata
+    import mcmetadata as mcmetadata_module
 
+    mcmetadata = mcmetadata_module
     MCMETADATA_AVAILABLE = True
 except ImportError:
     mcmetadata = None

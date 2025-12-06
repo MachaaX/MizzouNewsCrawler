@@ -74,6 +74,7 @@ RUN chown -R appuser:appuser /app
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser lookups/ ./lookups/
 COPY --chown=appuser:appuser orchestration/ ./orchestration/
+COPY --chown=appuser:appuser sitecustomize.py ./sitecustomize.py
 
 # Create data directory for SQLite (will be replaced with Cloud SQL)
 RUN mkdir -p /app/data && chown -R appuser:appuser /app/data

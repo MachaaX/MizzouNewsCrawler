@@ -48,6 +48,10 @@ spec:
                 secretKeyRef:
                   name: cloudsql-db-credentials
                   key: database
+            - name: MEDIACLOUD_SECRET_NAME
+              value: "mediacloud-api-token"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: "mizzou-news-crawler"
             resources:
               requests:
                 cpu: 150m

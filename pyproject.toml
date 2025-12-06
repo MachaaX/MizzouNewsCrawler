@@ -144,6 +144,8 @@ omit = [
     "src/cli/commands/proxy.py",  # 0% coverage, not imported anywhere
     # Legacy/deprecated modules - consider for future removal
     "src/utils/extraction_telemetry.py",  # Only used in scripts, superseded by comprehensive_telemetry
+    # Vendored third-party library - exercised via integration tests upstream
+    "src/mcmetadata/*",
 ]
 
 [tool.coverage.report]
