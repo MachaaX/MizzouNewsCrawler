@@ -13,6 +13,8 @@ from src.crawler import ContentExtractor
 from src.models.database import DatabaseManager, safe_session_execute
 from src.utils.byline_cleaner import BylineCleaner
 
+DEFAULT_WIRE_CHECK_STATUS = "pending"
+
 logger = logging.getLogger(__name__)
 
 
@@ -304,6 +306,10 @@ def _process_batch(articles, extractor, byline_cleaner, session, batch_num):
                                 text,
                                 status,
                                 metadata,
+                                wire_check_status,
+                                wire_check_attempted_at,
+                                wire_check_error,
+                                wire_check_metadata,
                                 extracted_at,
                                 created_at,
                                 extraction_version
@@ -318,6 +324,10 @@ def _process_batch(articles, extractor, byline_cleaner, session, batch_num):
                                 :text,
                                 :status,
                                 :metadata,
+                                :wire_check_status,
+                                :wire_check_attempted_at,
+                                :wire_check_error,
+                                :wire_check_metadata,
                                 :extracted_at,
                                 :created_at,
                                 :extraction_version
@@ -335,6 +345,10 @@ def _process_batch(articles, extractor, byline_cleaner, session, batch_num):
                             "text": content_data.get("content"),
                             "status": "extracted",
                             "metadata": str(metadata),
+                            "wire_check_status": DEFAULT_WIRE_CHECK_STATUS,
+                            "wire_check_attempted_at": None,
+                            "wire_check_error": None,
+                            "wire_check_metadata": None,
                             "extracted_at": now.isoformat(),
                             "created_at": now.isoformat(),
                             "extraction_version": "v1.0",

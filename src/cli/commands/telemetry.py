@@ -261,7 +261,7 @@ def _show_field_extraction(
     # Display field success rates by method
     print(
         f"\n{'Method':<15} {'Title':<8} {'Author':<8} "
-        f"{'Content':<8} {'Date':<8} {'Count':<8}"
+        f"{'Content':<8} {'Date':<8} {'Metadata':<10} {'Count':<8}"
     )
     print("-" * 80)
 
@@ -271,12 +271,13 @@ def _show_field_extraction(
         author_rate = data["author_success_rate"] * 100
         content_rate = data["content_success_rate"] * 100
         date_rate = data["date_success_rate"] * 100
+        metadata_rate = data.get("metadata_success_rate", 0.0) * 100
         count = data["count"]
 
         print(
             f"{method_name:<15} {title_rate:<7.1f}% "
             f"{author_rate:<7.1f}% {content_rate:<7.1f}% "
-            f"{date_rate:<7.1f}% {count:<8}"
+            f"{date_rate:<7.1f}% {metadata_rate:<9.1f}% {count:<8}"
         )
 
     # Show overall field success across all methods
@@ -303,11 +304,20 @@ def _show_field_extraction(
             / total_extractions
             * 100
         )
+        overall_metadata = (
+            sum(
+                data.get("metadata_success_rate", 0) * data["count"]
+                for data in field_data
+            )
+            / total_extractions
+            * 100
+        )
 
         print(f"Title Success:   {overall_title:.1f}%")
         print(f"Author Success:  {overall_author:.1f}%")
         print(f"Content Success: {overall_content:.1f}%")
         print(f"Date Success:    {overall_date:.1f}%")
+        print(f"Metadata Success: {overall_metadata:6.1f}%")
         print(f"Total Records:   {total_extractions}")
 
     return 0

@@ -280,6 +280,28 @@ class TestLocalBroadcasterCallsigns:
         assert "content" in result.evidence
         assert any("KMIZ" in m for m in result.evidence["content"])
 
+    def test_cross_broadcaster_byline_detected_as_wire(
+        self, detector, populated_broadcaster_callsigns, populated_wire_services
+    ):
+        """Byline crediting another broadcaster should be flagged as wire."""
+        # Clear caches to force database queries
+        detector._local_callsigns_cache = None
+        detector._cache_timestamp = None
+        detector._wire_patterns_cache = None
+        detector._wire_patterns_timestamp = None
+
+        result = detector.detect(
+            url="https://www.kbia.org/missouri-news/lane-closure-set-on-i-70",
+            title="Lane closure set on portion of I-70 in Columbia Wednesday",
+            metadata={"byline": "KBIA | By Andrew Calek, KOMU 8"},
+            content="Transportation officials announced lane closures in Columbia.",
+        )
+
+        assert result is not None
+        assert result.status == "wire"
+        assert "author" in result.evidence
+        assert any("KOMU" in m for m in result.evidence["author"])
+
     def test_komu_on_own_site_not_wire(
         self, detector, populated_broadcaster_callsigns, populated_wire_services
     ):

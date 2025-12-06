@@ -82,6 +82,7 @@ class ExtractionMetrics:
             "author": False,
             "content": False,
             "publish_date": False,
+            "metadata": False,
         }
         self.content_length = 0
         self.is_success = False
@@ -132,6 +133,9 @@ class ExtractionMetrics:
                 "author": bool(extracted_fields.get("author")),
                 "content": bool(extracted_fields.get("content")),
                 "publish_date": bool(extracted_fields.get("publish_date")),
+                "metadata": self._metadata_is_meaningful(
+                    extracted_fields.get("metadata")
+                ),
             }
 
             # Extract HTTP status from metadata if available
@@ -150,6 +154,34 @@ class ExtractionMetrics:
                     proxy_status=metadata.get("proxy_status"),
                     proxy_error=metadata.get("proxy_error"),
                 )
+
+    @staticmethod
+    def _metadata_is_meaningful(metadata: Any) -> bool:
+        """Determine whether metadata contains useful information."""
+        if metadata is None:
+            return False
+
+        if isinstance(metadata, dict):
+            if not metadata:
+                return False
+
+            for key, value in metadata.items():
+                if key in {"extraction_method", "extraction_methods"} and not value:
+                    continue
+
+                if value not in (None, "", [], {}, ()):  # Truthy payload present
+                    return True
+
+            # No meaningful values found; treat as meaningful only if we have
+            # non-tracking keys present (e.g., meta_description, http_status).
+            non_tracking_keys = [
+                key
+                for key in metadata.keys()
+                if key not in {"extraction_method", "extraction_methods"}
+            ]
+            return bool(non_tracking_keys)
+
+        return bool(metadata)
 
     def record_alternative_extraction(
         self,
@@ -233,6 +265,7 @@ class ExtractionMetrics:
                 "author": bool(final_result.get("author")),
                 "content": bool(final_result.get("content")),
                 "publish_date": bool(final_result.get("publish_date")),
+                "metadata": self._metadata_is_meaningful(final_result.get("metadata")),
             }
 
             # Capture final field attribution from metadata
@@ -1049,6 +1082,7 @@ class ComprehensiveExtractionTelemetry:
                                 "author_success": 0,
                                 "content_success": 0,
                                 "date_success": 0,
+                                "metadata_success": 0,
                             },
                         )
 
@@ -1062,6 +1096,8 @@ class ComprehensiveExtractionTelemetry:
                             stats["content_success"] += 1
                         if method_fields.get("publish_date"):
                             stats["date_success"] += 1
+                        if method_fields.get("metadata"):
+                            stats["metadata_success"] += 1
             finally:
                 cursor.close()
 
@@ -1077,6 +1113,7 @@ class ComprehensiveExtractionTelemetry:
                     "author_success_rate": stats["author_success"] / denominator,
                     "content_success_rate": stats["content_success"] / denominator,
                     "date_success_rate": stats["date_success"] / denominator,
+                    "metadata_success_rate": stats["metadata_success"] / denominator,
                 }
             )
 

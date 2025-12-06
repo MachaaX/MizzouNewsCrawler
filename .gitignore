@@ -89,6 +89,9 @@ models/productionmodel.pt
 backend/reviews.db*
 .decodo-credentials
 
+# Exported data artifacts
+exports/
+
 # Test databases
 *.db
 *.db-*

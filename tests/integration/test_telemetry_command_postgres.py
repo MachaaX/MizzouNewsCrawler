@@ -493,6 +493,7 @@ class TestTelemetryCommandPostgres:
                 "author_success_rate": 0.80,
                 "content_success_rate": 0.90,
                 "date_success_rate": 0.75,
+                "metadata_success_rate": 0.65,
                 "count": 100,
             },
             {
@@ -501,6 +502,7 @@ class TestTelemetryCommandPostgres:
                 "author_success_rate": 0.70,
                 "content_success_rate": 0.80,
                 "date_success_rate": 0.65,
+                "metadata_success_rate": 0.50,
                 "count": 50,
             },
         ]

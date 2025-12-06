@@ -12,16 +12,25 @@ Each step is executed with appropriate batching and error handling.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import text
 
+from src.models import Article, CandidateLink
 from src.models.database import DatabaseManager
+from src.services.wire_detection import (
+    DEFAULT_RATE_PER_MINUTE,
+    MediaCloudArticle,
+    MediaCloudDetector,
+)
 
 # Configuration from environment
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))  # seconds
@@ -45,6 +54,14 @@ ENABLE_ML_ANALYSIS = os.getenv("ENABLE_ML_ANALYSIS", "true").lower() == "true"
 ENABLE_ENTITY_EXTRACTION = (
     os.getenv("ENABLE_ENTITY_EXTRACTION", "true").lower() == "true"
 )
+WIRE_DETECTION_BATCH_SIZE = int(os.getenv("WIRE_DETECTION_BATCH_SIZE", "1"))
+MEDIACLOUD_RATE_PER_MINUTE = float(
+    os.getenv("MEDIACLOUD_RATE_PER_MINUTE", str(DEFAULT_RATE_PER_MINUTE))
+)
+_WIRE_ENV_ENABLED = os.getenv("ENABLE_WIRE_DETECTION", "true").lower() == "true"
+_MEDIACLOUD_TOKEN = os.getenv("MEDIACLOUD_API_TOKEN")
+ENABLE_WIRE_DETECTION = bool(_WIRE_ENV_ENABLED and _MEDIACLOUD_TOKEN)
+WIRE_DETECTION_ALLOWED_STATUSES = ("cleaned", "classified")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLI_MODULE = "src.cli.cli_modular"
@@ -56,6 +73,11 @@ logging.basicConfig(
     format="[%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+if _WIRE_ENV_ENABLED and not _MEDIACLOUD_TOKEN:
+    logger.warning(
+        "MediaCloud wire detection disabled: ENABLE_WIRE_DETECTION=true but MEDIACLOUD_API_TOKEN not set"
+    )
 
 
 class WorkQueue:
@@ -73,6 +95,7 @@ class WorkQueue:
             "cleaning_pending": 0,
             "analysis_pending": 0,
             "entity_extraction_pending": 0,
+            "wire_detection_pending": 0,
         }
 
         with DatabaseManager() as db:
@@ -138,6 +161,16 @@ class WorkQueue:
                     )
                 )
                 counts["entity_extraction_pending"] = result.scalar() or 0
+
+            if ENABLE_WIRE_DETECTION:
+                result = db.session.execute(
+                    text(
+                        "SELECT COUNT(*) FROM articles "
+                        "WHERE wire_check_status = 'pending' "
+                        "AND status IN ('cleaned', 'classified')"
+                    )
+                )
+                counts["wire_detection_pending"] = result.scalar() or 0
 
         return counts
 
@@ -294,6 +327,7 @@ def process_cleaning(count: int) -> bool:
 
 # Global cached entity extractor (loaded once at startup, never reloaded)
 _ENTITY_EXTRACTOR = None
+_MEDIACLOUD_DETECTOR = None
 
 
 def get_cached_entity_extractor():
@@ -309,6 +343,197 @@ def get_cached_entity_extractor():
         _ENTITY_EXTRACTOR = ArticleEntityExtractor()
         logger.info("✅ spaCy model loaded and cached in memory")
     return _ENTITY_EXTRACTOR
+
+
+def get_mediacloud_detector() -> MediaCloudDetector | None:
+    global _MEDIACLOUD_DETECTOR
+    if not ENABLE_WIRE_DETECTION:
+        return None
+    if _MEDIACLOUD_DETECTOR is None:
+        try:
+            _MEDIACLOUD_DETECTOR = MediaCloudDetector.from_token(
+                _MEDIACLOUD_TOKEN,
+                rate_per_minute=MEDIACLOUD_RATE_PER_MINUTE,
+                logger=logger,
+            )
+        except Exception:
+            logger.exception("Failed to initialise MediaCloud detector; disabling wire detection")
+            return None
+    return _MEDIACLOUD_DETECTOR
+
+
+@dataclass
+class PendingWireArticle:
+    id: str
+    url: str
+    title: str
+    source: str
+    extracted_at: datetime | None
+    status: str
+
+
+def _claim_wire_articles(limit: int) -> list[PendingWireArticle]:
+    claimed: list[PendingWireArticle] = []
+    attempts = 0
+
+    while len(claimed) < limit and attempts < limit * 3:
+        attempts += 1
+        with DatabaseManager() as db:
+            session = db.session
+
+            article = (
+                session.query(Article)
+                .join(CandidateLink, Article.candidate_link_id == CandidateLink.id)
+                .filter(
+                    Article.wire_check_status == "pending",
+                    Article.status.in_(WIRE_DETECTION_ALLOWED_STATUSES),
+                )
+                .order_by(Article.extracted_at)
+                .with_for_update(of=Article, nowait=False)
+                .first()
+            )
+
+            if article is None:
+                break
+
+            source = article.candidate_link.source if article.candidate_link else ""
+
+            updated = (
+                session.query(Article)
+                .filter(Article.id == article.id, Article.wire_check_status == "pending")
+                .update(
+                    {
+                        Article.wire_check_status: "processing",
+                        Article.wire_check_attempted_at: datetime.utcnow(),
+                        Article.wire_check_error: None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+
+            if updated != 1:
+                session.rollback()
+                continue
+
+            session.commit()
+
+            claimed.append(
+                PendingWireArticle(
+                    id=article.id,
+                    url=article.url or "",
+                    title=article.title or "",
+                    source=source or "",
+                    extracted_at=article.extracted_at,
+                    status=article.status or "",
+                )
+            )
+
+    return claimed
+
+
+def _apply_detection_result(
+    pending: PendingWireArticle,
+    result,
+) -> bool:
+    with DatabaseManager() as db:
+        session = db.session
+        article = session.query(Article).filter(Article.id == pending.id).one_or_none()
+        if article is None:
+            return False
+
+        attempted_at = result.queried_at
+        if attempted_at and getattr(attempted_at, "tzinfo", None):
+            attempted_at = attempted_at.astimezone(timezone.utc).replace(tzinfo=None)
+        article.wire_check_attempted_at = attempted_at
+
+        metadata = result.to_metadata()
+        article.wire_check_metadata = metadata
+
+        if result.status != "ok":
+            article.wire_check_status = "error"
+            article.wire_check_error = result.status
+            session.commit()
+            logger.warning(
+                "MediaCloud lookup failed for article %s with status %s",
+                pending.id,
+                result.status,
+            )
+            return False
+
+        article.wire_check_status = "complete"
+        article.wire_check_error = None
+
+        matched = result.has_matches
+
+        if matched:
+            existing_payload = article.wire
+            if isinstance(existing_payload, str):
+                try:
+                    existing_payload = json.loads(existing_payload)
+                except json.JSONDecodeError:
+                    existing_payload = {}
+            if not isinstance(existing_payload, dict):
+                existing_payload = {}
+
+            wire_payload = result.to_wire_payload()
+            wire_payload.setdefault("detected_at", datetime.utcnow().isoformat() + "Z")
+            existing_payload.update(wire_payload)
+            article.wire = existing_payload
+
+            if article.status != "wire":
+                article.status = "wire"
+
+            if article.candidate_link:
+                article.candidate_link.status = "wire"
+
+        session.commit()
+
+        return matched
+
+
+def process_wire_detection(count: int) -> bool:
+    if not ENABLE_WIRE_DETECTION or count == 0:
+        return False
+
+    detector = get_mediacloud_detector()
+    if detector is None:
+        return False
+
+    limit = min(count, max(1, WIRE_DETECTION_BATCH_SIZE))
+    pending_articles = _claim_wire_articles(limit)
+    if not pending_articles:
+        return False
+
+    processed_any = False
+
+    for pending in pending_articles:
+        extracted_at = pending.extracted_at
+        if extracted_at:
+            if extracted_at.tzinfo is None:
+                extracted_at = extracted_at.replace(tzinfo=timezone.utc)
+            else:
+                extracted_at = extracted_at.astimezone(timezone.utc)
+        media_article = MediaCloudArticle(
+            article_id=pending.id,
+            source=pending.source,
+            url=pending.url,
+            title=pending.title,
+            extracted_at=extracted_at,
+        )
+        result = detector.detect(media_article)
+        matched = _apply_detection_result(pending, result)
+        processed_any = True
+
+        if result.status == "ok" and matched:
+            logger.info(
+                "MediaCloud marked article %s as wire (hosts=%s)",
+                pending.id,
+                ", ".join(result.matched_hosts),
+            )
+        elif result.status == "ok":
+            logger.debug("MediaCloud found no wire matches for article %s", pending.id)
+
+    return processed_any
 
 
 def process_entity_extraction(count: int) -> bool:
@@ -375,13 +600,14 @@ def process_cycle() -> bool:
             ENABLE_VERIFICATION and counts["verification_pending"] > 0,
             ENABLE_EXTRACTION and counts["extraction_pending"] > 0,
             ENABLE_CLEANING and counts["cleaning_pending"] > 0,
+            ENABLE_WIRE_DETECTION and counts["wire_detection_pending"] > 0,
             ENABLE_ML_ANALYSIS and counts["analysis_pending"] > 0,
             ENABLE_ENTITY_EXTRACTION and counts["entity_extraction_pending"] > 0,
         ]
 
         has_pending_work = any(pending_flags)
 
-        # Priority order: verification → extraction → cleaning → analysis → entities
+        # Priority order: verification → extraction → cleaning → wire detection → analysis → entities
         # This ensures we process the pipeline in the correct sequence
         # Only run enabled steps (controlled by environment variables)
 
@@ -393,6 +619,9 @@ def process_cycle() -> bool:
 
         if ENABLE_CLEANING and counts["cleaning_pending"] > 0:
             process_cleaning(counts["cleaning_pending"])
+
+        if ENABLE_WIRE_DETECTION and counts["wire_detection_pending"] > 0:
+            process_wire_detection(counts["wire_detection_pending"])
 
         if ENABLE_ML_ANALYSIS and counts["analysis_pending"] > 0:
             process_analysis(counts["analysis_pending"])
@@ -425,12 +654,20 @@ def main() -> None:
     logger.info("  - Verification: %s", "✅" if ENABLE_VERIFICATION else "❌")
     logger.info("  - Extraction: %s", "✅" if ENABLE_EXTRACTION else "❌")
     logger.info("  - Cleaning: %s", "✅" if ENABLE_CLEANING else "❌")
+    logger.info("  - Wire Detection: %s", "✅" if ENABLE_WIRE_DETECTION else "❌")
     logger.info("  - ML Analysis: %s", "✅" if ENABLE_ML_ANALYSIS else "❌")
     logger.info("  - Entity Extraction: %s", "✅" if ENABLE_ENTITY_EXTRACTION else "❌")
     
     # Warn if no steps are enabled
-    if not any([ENABLE_DISCOVERY, ENABLE_VERIFICATION, ENABLE_EXTRACTION,
-                ENABLE_CLEANING, ENABLE_ML_ANALYSIS, ENABLE_ENTITY_EXTRACTION]):
+    if not any([
+        ENABLE_DISCOVERY,
+        ENABLE_VERIFICATION,
+        ENABLE_EXTRACTION,
+        ENABLE_CLEANING,
+        ENABLE_WIRE_DETECTION,
+        ENABLE_ML_ANALYSIS,
+        ENABLE_ENTITY_EXTRACTION,
+    ]):
         logger.warning("⚠️  No pipeline steps are enabled! Processor will be idle.")
 
     cycle_count = 0

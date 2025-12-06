@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import NoSuchTableError
 
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
 
 from orchestration import continuous_processor  # noqa: E402
+from src.models import Article, CandidateLink  # noqa: E402
+from src.models.database import DatabaseManager  # noqa: E402
+from src.services.wire_detection.mediacloud import (  # noqa: E402
+    DetectionResult,
+    MediaCloudArticle,
+)
 
 
 @pytest.fixture
@@ -42,6 +53,102 @@ def mock_subprocess():
         yield mock_popen
 
 
+def _ensure_wire_columns(engine) -> None:
+    """Ensure newly added wire check columns exist in SQLite test DB."""
+
+    Article.__table__.create(bind=engine, checkfirst=True)
+
+    try:
+        column_info = inspect(engine).get_columns("articles")
+    except NoSuchTableError:
+        Article.__table__.create(bind=engine)
+        column_info = inspect(engine).get_columns("articles")
+
+    column_names = {col["name"] for col in column_info}
+    additions = {
+        "wire_check_status": "TEXT DEFAULT 'pending'",
+        "wire_check_attempted_at": "DATETIME",
+        "wire_check_error": "TEXT",
+        "wire_check_metadata": "TEXT",
+    }
+
+    missing = [name for name in additions if name not in column_names]
+    if not missing:
+        return
+
+    with engine.begin() as conn:
+        for name in missing:
+            conn.execute(
+                text(f"ALTER TABLE articles ADD COLUMN {name} {additions[name]}")
+            )
+
+
+def _create_wire_test_article(
+    *,
+    article_status: str = "cleaned",
+    wire_status: str = "processing",
+) -> dict[str, str | datetime]:
+    """Create candidate link + article records for wire detection tests."""
+
+    db = DatabaseManager()
+    try:
+        _ensure_wire_columns(db.engine)
+        session = db.session
+        url = f"https://example.com/{uuid.uuid4()}"
+        candidate = CandidateLink(
+            url=url,
+            source="unit-test-source",
+            status="article",
+        )
+        session.add(candidate)
+        session.flush()
+
+        extracted_at = datetime.utcnow()
+        article = Article(
+            candidate_link_id=candidate.id,
+            url=url,
+            title="Unit Test Article",
+            status=article_status,
+            content="Sample content",
+            extracted_at=extracted_at,
+            wire_check_status=wire_status,
+        )
+        session.add(article)
+        session.commit()
+
+        return {
+            "article_id": article.id,
+            "candidate_id": candidate.id,
+            "url": url,
+            "title": article.title or "Unit Test Article",
+            "source": candidate.source,
+            "extracted_at": extracted_at,
+        }
+    finally:
+        db.close()
+
+
+def _cleanup_wire_test_article(article_id: str, candidate_id: str) -> None:
+    """Remove test records created via _create_wire_test_article."""
+
+    db = DatabaseManager()
+    try:
+        session = db.session
+        article = session.query(Article).filter(Article.id == article_id).one_or_none()
+        if article is not None:
+            session.delete(article)
+        candidate = (
+            session.query(CandidateLink)
+            .filter(CandidateLink.id == candidate_id)
+            .one_or_none()
+        )
+        if candidate is not None:
+            session.delete(candidate)
+        session.commit()
+    finally:
+        db.close()
+
+
 class TestWorkQueue:
     """Test the WorkQueue class."""
 
@@ -62,6 +169,7 @@ class TestWorkQueue:
             "cleaning_pending": 0,
             "analysis_pending": 0,
             "entity_extraction_pending": 0,
+            "wire_detection_pending": 0,
         }
         # Only enabled steps query the database (cleaning, ML, entities by default)
         # Verification and extraction are disabled by default, so 3 queries expected
@@ -90,6 +198,7 @@ class TestWorkQueue:
         assert counts["cleaning_pending"] == 12
         assert counts["analysis_pending"] == 15
         assert counts["entity_extraction_pending"] == 20
+        assert counts["wire_detection_pending"] == 0
 
     def test_get_counts_queries_correct_tables(self, mock_db_manager):
         """Test that get_counts executes correct SQL queries."""
@@ -303,6 +412,89 @@ class TestProcessAnalysis:
         assert limit_value == "100"
 
 
+class TestProcessWireDetection:
+    """Tests for wire detection processing integration."""
+
+    def test_process_wire_detection_returns_false_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(continuous_processor, "ENABLE_WIRE_DETECTION", False)
+        assert continuous_processor.process_wire_detection(5) is False
+
+    def test_process_wire_detection_returns_false_without_pending(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(continuous_processor, "ENABLE_WIRE_DETECTION", True)
+        dummy_detector = MagicMock()
+        monkeypatch.setattr(
+            continuous_processor, "get_mediacloud_detector", lambda: dummy_detector
+        )
+        monkeypatch.setattr(continuous_processor, "_claim_wire_articles", lambda _: [])
+
+        assert continuous_processor.process_wire_detection(3) is False
+        dummy_detector.detect.assert_not_called()
+
+    def test_process_wire_detection_processes_pending(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(continuous_processor, "ENABLE_WIRE_DETECTION", True)
+        monkeypatch.setattr(continuous_processor, "WIRE_DETECTION_BATCH_SIZE", 5)
+
+        dummy_result = MagicMock()
+        dummy_result.status = "ok"
+        dummy_result.matched_hosts = ["wire.example"]
+        dummy_result.matched_story_count = 1
+        dummy_result.has_matches = True
+        dummy_result.queried_at = datetime.now(timezone.utc)
+        dummy_result.to_metadata.return_value = {"status": "ok"}
+        dummy_result.to_wire_payload.return_value = {"provider": "mediacloud"}
+
+        detector = MagicMock()
+        detector.detect.return_value = dummy_result
+
+        monkeypatch.setattr(
+            continuous_processor, "get_mediacloud_detector", lambda: detector
+        )
+
+        pending = continuous_processor.PendingWireArticle(
+            id="article-1",
+            url="https://example.com/story",
+            title="Headline",
+            source="unit-test",
+            extracted_at=datetime.utcnow(),
+            status="cleaned",
+        )
+
+        monkeypatch.setattr(
+            continuous_processor,
+            "_claim_wire_articles",
+            lambda limit: [pending],
+        )
+
+        captured_calls: list[
+            tuple[continuous_processor.PendingWireArticle, MagicMock]
+        ] = []
+
+        def fake_apply(result_pending, result_object):
+            captured_calls.append((result_pending, result_object))
+            return True
+
+        monkeypatch.setattr(
+            continuous_processor,
+            "_apply_detection_result",
+            fake_apply,
+        )
+
+        processed = continuous_processor.process_wire_detection(10)
+
+        assert processed is True
+        detector.detect.assert_called_once()
+        detect_arg = detector.detect.call_args[0][0]
+        assert isinstance(detect_arg, MediaCloudArticle)
+        assert detect_arg.article_id == pending.id
+        assert captured_calls == [(pending, dummy_result)]
+
+
 class TestProcessEntityExtraction:
     """Test the process_entity_extraction function - now uses direct function call."""
 
@@ -369,6 +561,7 @@ class TestProcessCycle:
     @patch("orchestration.continuous_processor.process_verification")
     @patch("orchestration.continuous_processor.process_extraction")
     @patch("orchestration.continuous_processor.process_cleaning")
+    @patch("orchestration.continuous_processor.process_wire_detection")
     @patch("orchestration.continuous_processor.process_analysis")
     @patch("orchestration.continuous_processor.process_entity_extraction")
     @patch("orchestration.continuous_processor.WorkQueue.get_counts")
@@ -377,6 +570,7 @@ class TestProcessCycle:
         mock_get_counts,
         mock_entity,
         mock_analysis,
+        mock_wire_detection,
         mock_cleaning,
         mock_extraction,
         mock_verification,
@@ -391,6 +585,7 @@ class TestProcessCycle:
             "extraction_pending": 20,
             "cleaning_pending": 25,
             "analysis_pending": 30,
+            "wire_detection_pending": 0,
             "entity_extraction_pending": 40,
         }
 
@@ -403,12 +598,14 @@ class TestProcessCycle:
         # Cleaning, analysis, and entity extraction should be called (enabled by default)
         mock_cleaning.assert_called_once_with(25)
         mock_analysis.assert_called_once_with(30)
+        mock_wire_detection.assert_not_called()
         mock_entity.assert_called_once_with(40)
 
         assert result is True
 
     @patch("orchestration.continuous_processor.process_verification")
     @patch("orchestration.continuous_processor.process_extraction")
+    @patch("orchestration.continuous_processor.process_wire_detection")
     @patch("orchestration.continuous_processor.process_analysis")
     @patch("orchestration.continuous_processor.process_entity_extraction")
     @patch("orchestration.continuous_processor.WorkQueue.get_counts")
@@ -417,6 +614,7 @@ class TestProcessCycle:
         mock_get_counts,
         mock_entity,
         mock_analysis,
+        mock_wire_detection,
         mock_extraction,
         mock_verification,
     ):
@@ -426,12 +624,14 @@ class TestProcessCycle:
             "extraction_pending": 0,
             "cleaning_pending": 0,
             "analysis_pending": 0,
+            "wire_detection_pending": 0,
             "entity_extraction_pending": 0,
         }
 
         # Make the process functions return False (behavior when count is 0)
         mock_verification.return_value = False
         mock_extraction.return_value = False
+        mock_wire_detection.return_value = False
         mock_analysis.return_value = False
         mock_entity.return_value = False
 
@@ -441,6 +641,7 @@ class TestProcessCycle:
         # So with all counts at 0, none should be called
         mock_verification.assert_not_called()
         mock_extraction.assert_not_called()
+        mock_wire_detection.assert_not_called()
         mock_analysis.assert_not_called()
         mock_entity.assert_not_called()
 
@@ -502,6 +703,7 @@ class TestEnvironmentConfiguration:
         assert hasattr(continuous_processor, "ENABLE_VERIFICATION")
         assert hasattr(continuous_processor, "ENABLE_EXTRACTION")
         assert hasattr(continuous_processor, "ENABLE_CLEANING")
+        assert hasattr(continuous_processor, "ENABLE_WIRE_DETECTION")
         assert hasattr(continuous_processor, "ENABLE_ML_ANALYSIS")
         assert hasattr(continuous_processor, "ENABLE_ENTITY_EXTRACTION")
 
@@ -510,6 +712,7 @@ class TestEnvironmentConfiguration:
         assert isinstance(continuous_processor.ENABLE_VERIFICATION, bool)
         assert isinstance(continuous_processor.ENABLE_EXTRACTION, bool)
         assert isinstance(continuous_processor.ENABLE_CLEANING, bool)
+        assert isinstance(continuous_processor.ENABLE_WIRE_DETECTION, bool)
         assert isinstance(continuous_processor.ENABLE_ML_ANALYSIS, bool)
         assert isinstance(continuous_processor.ENABLE_ENTITY_EXTRACTION, bool)
 
@@ -524,8 +727,197 @@ class TestEnvironmentConfiguration:
         # Cleaning, ML analysis, and entity extraction should be enabled by default
         # (remain in continuous processor)
         assert continuous_processor.ENABLE_CLEANING is True
+        assert continuous_processor.ENABLE_WIRE_DETECTION is False
         assert continuous_processor.ENABLE_ML_ANALYSIS is True
         assert continuous_processor.ENABLE_ENTITY_EXTRACTION is True
+
+
+class TestApplyDetectionResult:
+    """Tests for applying MediaCloud detection outcomes to the database."""
+
+    def test_apply_detection_result_marks_wire_article(self) -> None:
+        record = _create_wire_test_article()
+        try:
+            pending = continuous_processor.PendingWireArticle(
+                id=record["article_id"],
+                url=record["url"],
+                title=str(record["title"]),
+                source=str(record["source"]),
+                extracted_at=record["extracted_at"],
+                status="cleaned",
+            )
+            media_article = MediaCloudArticle(
+                article_id=record["article_id"],
+                source=str(record["source"]),
+                url=record["url"],
+                title=str(record["title"]),
+                extracted_at=record["extracted_at"].replace(tzinfo=timezone.utc),
+            )
+            result = DetectionResult(
+                article=media_article,
+                query='"Unit Test Article"',
+                story_count=3,
+                matched_story_count=2,
+                matched_hosts=["wire.example"],
+                matched_story_ids=["101", "102"],
+                status="ok",
+                queried_at=datetime.now(timezone.utc),
+            )
+
+            matched = continuous_processor._apply_detection_result(pending, result)
+            assert matched is True
+
+            db = DatabaseManager()
+            try:
+                session = db.session
+                article = (
+                    session.query(Article).filter_by(id=record["article_id"]).one()
+                )
+                candidate = (
+                    session.query(CandidateLink)
+                    .filter_by(id=record["candidate_id"])
+                    .one()
+                )
+
+                assert article.wire_check_status == "complete"
+                assert article.wire_check_error is None
+                assert article.status == "wire"
+                assert candidate.status == "wire"
+                payload = article.wire
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                assert isinstance(payload, dict)
+                assert payload.get("provider") == "mediacloud"
+                assert "detected_at" in payload
+                metadata = article.wire_check_metadata
+                assert isinstance(metadata, dict)
+                assert metadata.get("status") == "ok"
+                assert article.wire_check_attempted_at is not None
+                assert article.wire_check_attempted_at.tzinfo is None
+            finally:
+                db.close()
+        finally:
+            _cleanup_wire_test_article(record["article_id"], record["candidate_id"])
+
+    def test_apply_detection_result_handles_no_matches(self) -> None:
+        record = _create_wire_test_article()
+        try:
+            pending = continuous_processor.PendingWireArticle(
+                id=record["article_id"],
+                url=record["url"],
+                title=str(record["title"]),
+                source=str(record["source"]),
+                extracted_at=record["extracted_at"],
+                status="cleaned",
+            )
+            media_article = MediaCloudArticle(
+                article_id=record["article_id"],
+                source=str(record["source"]),
+                url=record["url"],
+                title=str(record["title"]),
+                extracted_at=record["extracted_at"].replace(tzinfo=timezone.utc),
+            )
+            result = DetectionResult(
+                article=media_article,
+                query='"Unit Test Article"',
+                story_count=1,
+                matched_story_count=0,
+                matched_hosts=[],
+                matched_story_ids=[],
+                status="ok",
+                queried_at=datetime.now(timezone.utc),
+            )
+
+            matched = continuous_processor._apply_detection_result(pending, result)
+            assert matched is False
+
+            db = DatabaseManager()
+            try:
+                session = db.session
+                article = (
+                    session.query(Article).filter_by(id=record["article_id"]).one()
+                )
+                candidate = (
+                    session.query(CandidateLink)
+                    .filter_by(id=record["candidate_id"])
+                    .one()
+                )
+
+                assert article.wire_check_status == "complete"
+                assert article.wire_check_error is None
+                assert article.status == "cleaned"
+                assert candidate.status == "article"
+                payload = article.wire
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                assert payload in (None, {})
+                metadata = article.wire_check_metadata
+                assert isinstance(metadata, dict)
+                assert metadata.get("status") == "ok"
+            finally:
+                db.close()
+        finally:
+            _cleanup_wire_test_article(record["article_id"], record["candidate_id"])
+
+    def test_apply_detection_result_records_errors(self) -> None:
+        record = _create_wire_test_article()
+        try:
+            pending = continuous_processor.PendingWireArticle(
+                id=record["article_id"],
+                url=record["url"],
+                title=str(record["title"]),
+                source=str(record["source"]),
+                extracted_at=record["extracted_at"],
+                status="cleaned",
+            )
+            media_article = MediaCloudArticle(
+                article_id=record["article_id"],
+                source=str(record["source"]),
+                url=record["url"],
+                title=str(record["title"]),
+                extracted_at=record["extracted_at"].replace(tzinfo=timezone.utc),
+            )
+            result = DetectionResult(
+                article=media_article,
+                query='"Unit Test Article"',
+                story_count=0,
+                matched_story_count=0,
+                matched_hosts=[],
+                matched_story_ids=[],
+                status="api_error:429",
+                queried_at=datetime.now(timezone.utc),
+            )
+
+            matched = continuous_processor._apply_detection_result(pending, result)
+            assert matched is False
+
+            db = DatabaseManager()
+            try:
+                session = db.session
+                article = (
+                    session.query(Article).filter_by(id=record["article_id"]).one()
+                )
+                candidate = (
+                    session.query(CandidateLink)
+                    .filter_by(id=record["candidate_id"])
+                    .one()
+                )
+
+                assert article.wire_check_status == "error"
+                assert article.wire_check_error == "api_error:429"
+                assert article.status == "cleaned"
+                assert candidate.status == "article"
+                payload = article.wire
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                assert payload in (None, {})
+                metadata = article.wire_check_metadata
+                assert isinstance(metadata, dict)
+                assert metadata.get("status") == "api_error:429"
+            finally:
+                db.close()
+        finally:
+            _cleanup_wire_test_article(record["article_id"], record["candidate_id"])
 
 
 class TestCommandArgumentsRegression:
@@ -567,12 +959,14 @@ class TestFeatureFlagProcessing:
 
     @patch("orchestration.continuous_processor.process_verification")
     @patch("orchestration.continuous_processor.process_extraction")
+    @patch("orchestration.continuous_processor.process_wire_detection")
     @patch("orchestration.continuous_processor.process_cleaning")
     @patch("orchestration.continuous_processor.WorkQueue.get_counts")
     def test_disabled_steps_not_called(
         self,
         mock_get_counts,
         mock_cleaning,
+        mock_wire_detection,
         mock_extraction,
         mock_verification,
     ):
@@ -586,6 +980,7 @@ class TestFeatureFlagProcessing:
             "extraction_pending": 20,
             "cleaning_pending": 30,
             "analysis_pending": 0,
+            "wire_detection_pending": 5,
             "entity_extraction_pending": 0,
         }
 
@@ -594,6 +989,7 @@ class TestFeatureFlagProcessing:
         # Verification and extraction should not be called (disabled by default)
         mock_verification.assert_not_called()
         mock_extraction.assert_not_called()
+        mock_wire_detection.assert_not_called()
 
         # Cleaning should still be called (enabled by default)
         mock_cleaning.assert_called_once_with(30)
@@ -618,3 +1014,4 @@ class TestFeatureFlagProcessing:
         assert "cleaning_pending" in counts
         assert "analysis_pending" in counts
         assert "entity_extraction_pending" in counts
+        assert "wire_detection_pending" in counts

@@ -256,6 +256,14 @@ def wire_detection_test_session():
             active=True,
         ),
         WireService(
+            pattern="/brandpoint/",
+            pattern_type="url",
+            service_name="Brandpoint",
+            case_sensitive=False,
+            priority=20,
+            active=True,
+        ),
+        WireService(
             pattern="/wire/",
             pattern_type="url",
             service_name="Wire Service",
