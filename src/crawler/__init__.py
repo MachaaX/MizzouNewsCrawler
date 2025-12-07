@@ -13,11 +13,10 @@ import threading
 import time
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
-
-from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup, Tag

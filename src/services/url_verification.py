@@ -14,6 +14,7 @@ import re
 import sys
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ except ImportError:
 from src.crawler.origin_proxy import enable_origin_proxy  # noqa: E402
 from src.crawler.proxy_config import get_proxy_manager  # noqa: E402
 from src.models.database import DatabaseManager, safe_execute  # noqa: E402
+from src.models.verification import VerificationPattern  # noqa: E402
 from src.utils.telemetry import (  # noqa: E402
     OperationTracker,
     create_telemetry_system,
@@ -77,6 +79,26 @@ _ALT_USER_AGENTS = [
         "Version/15.1 Safari/605.1.15"
     ),
 ]
+
+_PATTERN_CACHE_TTL_ENV_VAR = "VERIFICATION_PATTERN_CACHE_TTL_SECONDS"
+_DEFAULT_PATTERN_CACHE_TTL_SECONDS = 300
+_MIN_PATTERN_CACHE_TTL_SECONDS = 30
+
+_PATTERN_STATUS_OVERRIDES: dict[str, str] = {
+    "wire": "wire",
+    "obituary": "obituary",
+    "opinion": "opinion",
+}
+
+
+@dataclass(frozen=True)
+class _VerificationPatternRule:
+    identifier: str
+    regex: re.Pattern[str]
+    raw_regex: str
+    status: str
+    pattern_type: str
+    description: str | None
 
 
 class URLVerificationService:
@@ -131,7 +153,30 @@ class URLVerificationService:
         self.proxy_manager = get_proxy_manager()
         self._configure_proxy()
         self._prepare_http_session()
+        self._pattern_cache: list[_VerificationPatternRule] | None = None
+        self._pattern_cache_expiry: float = 0.0
+        self._pattern_cache_ttl = self._resolve_pattern_cache_ttl()
         self.running = False
+
+    def _resolve_pattern_cache_ttl(self) -> int:
+        """Determine cache TTL for verification patterns with sane defaults."""
+
+        raw_value = os.getenv(_PATTERN_CACHE_TTL_ENV_VAR, "").strip()
+        if not raw_value:
+            return _DEFAULT_PATTERN_CACHE_TTL_SECONDS
+
+        try:
+            parsed = int(raw_value)
+        except ValueError:
+            self.logger.warning(
+                "Invalid %s value '%s'; using default TTL %ss",
+                _PATTERN_CACHE_TTL_ENV_VAR,
+                raw_value,
+                _DEFAULT_PATTERN_CACHE_TTL_SECONDS,
+            )
+            return _DEFAULT_PATTERN_CACHE_TTL_SECONDS
+
+        return max(_MIN_PATTERN_CACHE_TTL_SECONDS, parsed)
 
     def _configure_proxy(self) -> None:
         """Configure HTTP session proxy routing according to provider settings."""
@@ -214,6 +259,95 @@ class URLVerificationService:
         for key, value in self.http_headers.items():
             if key not in session_headers:
                 session_headers[key] = value
+
+    def _map_pattern_type_to_status(self, pattern_type: str | None) -> str:
+        """Map a verification pattern type to a candidate status."""
+
+        if not pattern_type:
+            return "not_article"
+
+        normalized = pattern_type.strip().lower()
+        if not normalized:
+            return "not_article"
+
+        return _PATTERN_STATUS_OVERRIDES.get(normalized, "not_article")
+
+    def _load_dynamic_patterns(self) -> list[_VerificationPatternRule]:
+        """Fetch and cache active verification patterns from the database."""
+
+        now = time.time()
+        if self._pattern_cache is not None and now < self._pattern_cache_expiry:
+            return self._pattern_cache
+
+        patterns: list[_VerificationPatternRule] = []
+
+        try:
+            with self.db.get_session() as session:
+                query = getattr(session, "query", None)
+                if query is None:
+                    raise AttributeError("Session does not support query()")
+
+                rows = (
+                    query(VerificationPattern)
+                    .filter(VerificationPattern.is_active.is_(True))
+                    .all()
+                )
+        except Exception as exc:  # pragma: no cover - defensive path
+            self.logger.debug(
+                "Falling back to static URL heuristics; pattern fetch failed: %s",
+                exc,
+            )
+            self._pattern_cache = []
+            self._pattern_cache_expiry = now + self._pattern_cache_ttl
+            return self._pattern_cache
+
+        for row in rows:
+            pattern_regex = getattr(row, "pattern_regex", None)
+            pattern_type = getattr(row, "pattern_type", None)
+
+            if not pattern_regex or not pattern_regex.strip():
+                continue
+
+            try:
+                compiled = re.compile(pattern_regex, re.IGNORECASE)
+            except re.error as exc:
+                self.logger.warning(
+                    "Skipping invalid verification pattern %s (%s): %s",
+                    getattr(row, "id", "<unknown>"),
+                    pattern_regex,
+                    exc,
+                )
+                continue
+
+            patterns.append(
+                _VerificationPatternRule(
+                    identifier=getattr(row, "id", ""),
+                    regex=compiled,
+                    raw_regex=pattern_regex,
+                    status=self._map_pattern_type_to_status(pattern_type),
+                    pattern_type=pattern_type or "",
+                    description=getattr(row, "pattern_description", None),
+                )
+            )
+
+        self._pattern_cache = patterns
+        self._pattern_cache_expiry = now + self._pattern_cache_ttl
+        return self._pattern_cache
+
+    def _match_dynamic_pattern(self, url: str) -> _VerificationPatternRule | None:
+        """Return the first dynamic verification pattern that matches the URL."""
+
+        try:
+            patterns = self._load_dynamic_patterns()
+        except Exception as exc:  # pragma: no cover - defensive path
+            self.logger.debug("Pattern matching disabled due to load failure: %s", exc)
+            return None
+
+        for rule in patterns:
+            if rule.regex.search(url):
+                return rule
+
+        return None
 
     def _check_http_health(self, url: str) -> tuple[bool, int | None, str | None, int]:
         """Perform a lightweight HTTP check with retries.
@@ -367,6 +501,9 @@ class URLVerificationService:
             "http_attempts": 0,
             "pattern_filtered": False,
             "wire_filtered": False,
+            "pattern_status": None,
+            "pattern_type": None,
+            "pattern_id": None,
         }
 
         # Stage 0: Check for wire service URLs (highest priority)
@@ -393,6 +530,23 @@ class URLVerificationService:
                     return result
 
         # Stage 1: Fast URL pattern check
+        matched_pattern = self._match_dynamic_pattern(url)
+        if matched_pattern is not None:
+            result["storysniffer_result"] = False
+            result["pattern_filtered"] = True
+            result["pattern_status"] = matched_pattern.status
+            result["pattern_type"] = matched_pattern.pattern_type or None
+            result["pattern_id"] = matched_pattern.identifier or None
+            result["verification_time_ms"] = (time.time() - start_time) * 1000
+
+            self.logger.debug(
+                "Filtered non-article by verification pattern: %s (type=%s, status=%s)",
+                url,
+                (matched_pattern.pattern_type or "unknown"),
+                matched_pattern.status,
+            )
+            return result
+
         from src.utils.url_classifier import is_likely_article_url
 
         if not is_likely_article_url(url):
@@ -548,6 +702,16 @@ class URLVerificationService:
                 # Wire service URL detected - mark as wire
                 batch_metrics["verified_non_articles"] += 1
                 new_status = "wire"
+                error_message = None
+            elif verification_result.get("pattern_filtered"):
+                pattern_status = (
+                    verification_result.get("pattern_status") or "not_article"
+                )
+                if pattern_status == "article":
+                    batch_metrics["verified_articles"] += 1
+                else:
+                    batch_metrics["verified_non_articles"] += 1
+                new_status = pattern_status
                 error_message = None
             elif verification_result.get("storysniffer_result"):
                 batch_metrics["verified_articles"] += 1

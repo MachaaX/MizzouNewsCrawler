@@ -66,6 +66,11 @@ ENABLE_MEDIACLOUD_WIRE_CHECK = os.getenv(
     "ENABLE_WIRE_DETECTION", "true"
 ).lower() == "true" and bool(_MEDIACLOUD_TOKEN)
 
+WIRE_CHECK_STATUS_PENDING = "pending"
+WIRE_CHECK_STATUS_COMPLETE = "complete"
+WIRE_CHECK_INITIAL_PENDING_STATUSES = {"extracted"}
+WIRE_CHECK_QUEUE_STATUSES = {"cleaned", "local", "labeled"}
+
 
 class _PlaceholderNotFoundError(Exception):
     """Fallback exception until crawler dependencies are loaded."""
@@ -86,6 +91,16 @@ def _ensure_crawler_dependencies() -> None:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _initial_wire_check_status(article_status: str) -> str:
+    """Determine the wire_check_status value for newly inserted articles."""
+
+    if not ENABLE_MEDIACLOUD_WIRE_CHECK:
+        return WIRE_CHECK_STATUS_COMPLETE
+    if article_status in WIRE_CHECK_INITIAL_PENDING_STATUSES:
+        return WIRE_CHECK_STATUS_PENDING
+    return WIRE_CHECK_STATUS_COMPLETE
 
 
 def _get_worker_id() -> str:
@@ -255,9 +270,6 @@ def _get_content_type_detector() -> ContentTypeDetector:
     if _CONTENT_TYPE_DETECTOR is None:
         _CONTENT_TYPE_DETECTOR = ContentTypeDetector()
     return _CONTENT_TYPE_DETECTOR
-
-
-DEFAULT_WIRE_CHECK_STATUS = "pending"
 
 
 ARTICLE_INSERT_SQL = text(
@@ -1215,6 +1227,16 @@ def _process_batch(
                                 "error": "Insufficient content (no paywall detected)",
                             },
                         )
+                        try:
+                            _commit_with_retry(session)
+                        except Exception as commit_error:
+                            logger.error(
+                                "Failed to commit insufficient-content update for %s: %s",
+                                url,
+                                commit_error,
+                                exc_info=True,
+                            )
+                            raise
                         continue  # Skip to next article
 
                     text_hash = calculate_content_hash(content_text)
@@ -1249,6 +1271,8 @@ def _process_batch(
                         except Exception:
                             logger.exception("Failed to log diagnostic SQL/params")
 
+                    wire_check_status = _initial_wire_check_status(article_status)
+
                     safe_session_execute(
                         session,
                         ARTICLE_INSERT_SQL,
@@ -1264,7 +1288,7 @@ def _process_batch(
                             "status": article_status,
                             "metadata": json.dumps(content.get("metadata", {})),
                             "wire": wire_service_info,
-                            "wire_check_status": DEFAULT_WIRE_CHECK_STATUS,
+                            "wire_check_status": wire_check_status,
                             "wire_check_attempted_at": None,
                             "wire_check_error": None,
                             "wire_check_metadata": None,
@@ -1693,7 +1717,10 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                     status_changed = new_status != current_status
 
                     if status_changed and current_status == "extracted":
-                        if ENABLE_MEDIACLOUD_WIRE_CHECK and new_status == "cleaned":
+                        if (
+                            ENABLE_MEDIACLOUD_WIRE_CHECK
+                            and new_status in WIRE_CHECK_QUEUE_STATUSES
+                        ):
                             safe_session_execute(
                                 session,
                                 ARTICLE_MARK_WIRE_PENDING_SQL,

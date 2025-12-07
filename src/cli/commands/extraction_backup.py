@@ -3,6 +3,7 @@ Extraction command module for the modular CLI.
 """
 
 import logging
+import os
 import time
 import uuid
 from datetime import datetime
@@ -13,9 +14,22 @@ from src.crawler import ContentExtractor
 from src.models.database import DatabaseManager, safe_session_execute
 from src.utils.byline_cleaner import BylineCleaner
 
-DEFAULT_WIRE_CHECK_STATUS = "pending"
+WIRE_CHECK_STATUS_PENDING = "pending"
+WIRE_CHECK_STATUS_COMPLETE = "complete"
+WIRE_CHECK_INITIAL_PENDING_STATUSES = {"extracted"}
+ENABLE_MEDIACLOUD_WIRE_CHECK = (
+    os.getenv("ENABLE_WIRE_DETECTION", "true").lower() == "true"
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _initial_wire_check_status(article_status: str) -> str:
+    if not ENABLE_MEDIACLOUD_WIRE_CHECK:
+        return WIRE_CHECK_STATUS_COMPLETE
+    if article_status in WIRE_CHECK_INITIAL_PENDING_STATUSES:
+        return WIRE_CHECK_STATUS_PENDING
+    return WIRE_CHECK_STATUS_COMPLETE
 
 
 def add_extraction_parser(subparsers):
@@ -345,7 +359,9 @@ def _process_batch(articles, extractor, byline_cleaner, session, batch_num):
                             "text": content_data.get("content"),
                             "status": "extracted",
                             "metadata": str(metadata),
-                            "wire_check_status": DEFAULT_WIRE_CHECK_STATUS,
+                            "wire_check_status": _initial_wire_check_status(
+                                "extracted"
+                            ),
                             "wire_check_attempted_at": None,
                             "wire_check_error": None,
                             "wire_check_metadata": None,

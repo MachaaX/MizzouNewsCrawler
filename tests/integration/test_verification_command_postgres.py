@@ -25,7 +25,7 @@ from src.cli.commands.verification import (
     handle_verification_command,
     show_verification_status,
 )
-from src.models import CandidateLink, Source
+from src.models import CandidateLink, Source, VerificationPattern
 
 # Mark all tests to require PostgreSQL and run in integration job
 pytestmark = [pytest.mark.postgres, pytest.mark.integration]
@@ -207,6 +207,78 @@ class TestVerificationCommandPostgres:
 
 class TestVerificationPostgresFeatures:
     """Test PostgreSQL-specific verification features."""
+
+    def test_dynamic_pattern_filters_obituary_urls(
+        self,
+        cloud_sql_session,
+        test_source,
+        discovered_candidates,
+        monkeypatch,
+    ):
+        """Ensure DB-backed verification patterns short-circuit StorySniffer."""
+
+        pattern = VerificationPattern(
+            pattern_type="obituary",
+            pattern_regex="/obits/",
+            pattern_description="Matches obituary URLs",
+            is_active=True,
+        )
+        cloud_sql_session.add(pattern)
+        cloud_sql_session.flush()
+
+        target_url = "https://test-verification.example.com/news/obits/john-doe"
+
+        class _PatchedDatabaseManager:
+            def __init__(self):
+                self.engine = cloud_sql_session.get_bind()
+
+            def get_session(self):
+                from contextlib import contextmanager
+
+                @contextmanager
+                def _session_context():
+                    yield cloud_sql_session
+
+                return _session_context()
+
+        from src.services.url_verification import URLVerificationService
+
+        monkeypatch.setattr(
+            "src.services.url_verification.DatabaseManager",
+            lambda *_, **__: _PatchedDatabaseManager(),
+        )
+
+        class _FakeTelemetry:
+            def record_verification_batch(self, *args, **kwargs):
+                return None
+
+        service = URLVerificationService(
+            run_http_precheck=False, telemetry_tracker=_FakeTelemetry()
+        )
+        service._pattern_cache = None
+        service._pattern_cache_expiry = 0
+
+        monkeypatch.setattr(
+            service.sniffer,
+            "guess",
+            lambda _: (_ for _ in ()).throw(
+                AssertionError("StorySniffer should not execute for pattern hits")
+            ),
+        )
+
+        first_result = service.verify_url(target_url)
+        assert first_result["pattern_filtered"] is True
+        assert first_result["pattern_status"] == "obituary"
+        assert first_result["pattern_type"] == "obituary"
+        assert first_result["pattern_id"] == pattern.id
+        assert first_result["storysniffer_result"] is False
+        assert first_result["error"] is None
+
+        second_result = service.verify_url(target_url)
+        assert second_result["pattern_filtered"] is True
+        assert second_result["pattern_status"] == "obituary"
+        assert second_result["pattern_id"] == pattern.id
+        assert second_result["error"] is None
 
     def test_candidate_link_ordering_postgres(
         self, cloud_sql_session, test_source, discovered_candidates
