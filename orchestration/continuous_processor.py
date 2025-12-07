@@ -70,7 +70,7 @@ MEDIACLOUD_RATE_PER_MINUTE = float(
 _WIRE_ENV_ENABLED = os.getenv("ENABLE_WIRE_DETECTION", "true").lower() == "true"
 _MEDIACLOUD_TOKEN = resolve_api_token(logger=logger)
 ENABLE_WIRE_DETECTION = bool(_WIRE_ENV_ENABLED and _MEDIACLOUD_TOKEN)
-WIRE_DETECTION_ALLOWED_STATUSES = ("cleaned", "classified")
+WIRE_DETECTION_ALLOWED_STATUSES = ("cleaned", "local", "labeled", "classified")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLI_MODULE = "src.cli.cli_modular"
@@ -168,7 +168,7 @@ class WorkQueue:
                     text(
                         "SELECT COUNT(*) FROM articles "
                         "WHERE wire_check_status = 'pending' "
-                        "AND status IN ('cleaned', 'classified')"
+                        "AND status IN ('cleaned', 'local', 'labeled', 'classified')"
                     )
                 )
                 counts["wire_detection_pending"] = result.scalar() or 0

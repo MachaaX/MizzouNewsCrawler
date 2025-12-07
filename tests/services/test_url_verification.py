@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from types import SimpleNamespace
 from typing import Any, Iterator, Optional
@@ -96,6 +97,40 @@ def test_verify_url_success() -> None:
     assert result["http_attempts"] == 0
 
 
+def test_verify_url_dynamic_pattern_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _service()
+
+    pattern_rule = url_verification._VerificationPatternRule(
+        identifier="pattern-1",
+        regex=re.compile("obits", re.IGNORECASE),
+        raw_regex="obits",
+        status="obituary",
+        pattern_type="obituary",
+        description="Obituary URLs",
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_load_dynamic_patterns",
+        lambda: [pattern_rule],
+    )
+
+    def fail_sniffer(_: str) -> bool:
+        raise AssertionError("StorySniffer should not run when pattern matches")
+
+    monkeypatch.setattr(service.sniffer, "guess", fail_sniffer)
+
+    result = service.verify_url("https://example.com/news/obits/john-doe")
+
+    assert result["pattern_filtered"] is True
+    assert result["pattern_status"] == "obituary"
+    assert result["pattern_type"] == "obituary"
+    assert result["storysniffer_result"] is False
+    assert result["error"] is None
+
+
 def test_verify_url_handles_sniffer_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -169,6 +204,40 @@ def test_process_batch_collects_metrics(
         {"id": "2", "status": "not_article", "error": None},
         {"id": "3", "status": "verification_uncertain", "error": "boom"},
     ]
+
+
+def test_process_batch_respects_pattern_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(batch_size=1)
+
+    verification_result = {
+        "storysniffer_result": False,
+        "pattern_filtered": True,
+        "pattern_status": "obituary",
+        "pattern_type": "obituary",
+        "verification_time_ms": 5.0,
+        "error": None,
+    }
+
+    monkeypatch.setattr(service, "verify_url", lambda url: dict(verification_result))
+
+    updates: list[tuple[str, str, Optional[str]]] = []
+
+    def capture_update(
+        candidate_id: str, status: str, error: Optional[str] = None
+    ) -> None:
+        updates.append((candidate_id, status, error))
+
+    monkeypatch.setattr(service, "update_candidate_status", capture_update)
+
+    batch = [{"id": "candidate-1", "url": "https://example.com/news/obits/foo"}]
+
+    metrics = service.process_batch(batch)
+
+    assert metrics["total_processed"] == 1
+    assert metrics["verified_articles"] == 0
+    assert metrics["verified_non_articles"] == 1
+    assert metrics["verification_errors"] == 0
+    assert updates == [("candidate-1", "obituary", None)]
 
 
 def test_update_candidate_status_with_and_without_error(

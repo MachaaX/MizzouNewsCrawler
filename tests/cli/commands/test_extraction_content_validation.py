@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 from collections import defaultdict
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -252,6 +253,7 @@ class TestContentValidationLogic:
             "ContentTypeDetector",
             lambda **kw: Mock(detect=lambda **k: None),
         )
+        monkeypatch.setattr(extraction, "ENABLE_MEDIACLOUD_WIRE_CHECK", True)
 
         db = FakeDBManager()
         args = Namespace(dump_sql=False)
@@ -275,7 +277,126 @@ class TestContentValidationLogic:
 
         # Verify article was inserted (sufficient content after cleaning)
         assert len(db.session.insert_calls) == 1
+        assert db.session.insert_calls[0]["wire_check_status"] == "pending"
         assert result["processed"] == 1
+
+    def test_wire_service_article_sets_wire_check_complete(self, monkeypatch):
+        """Wire-detected articles should skip MediaCloud checks."""
+
+        rows = [
+            (
+                "cand-1",
+                "https://example.com/article",
+                "example.com",
+                "article",
+                "Example Site",
+            )
+        ]
+
+        class FakeSession:
+            def __init__(self):
+                self.insert_calls = []
+                self.update_calls = []
+                self.commit_calls = 0
+
+            def execute(self, query, params=None):
+                if hasattr(query, "text") and "INSERT INTO articles" in str(query):
+                    self.insert_calls.append(params)
+                elif hasattr(query, "text") and "UPDATE candidate_links" in str(query):
+                    self.update_calls.append(params)
+                elif params and "limit_with_buffer" in params:
+                    return Mock(fetchall=lambda: rows)
+                return Mock(fetchall=lambda: [], scalar=lambda: None)
+
+            def commit(self):
+                self.commit_calls += 1
+
+            def close(self):
+                pass
+
+            def expire_all(self):
+                pass
+
+            def rollback(self):
+                pass
+
+        class FakeDBManager:
+            def __init__(self):
+                self.session = FakeSession()
+
+        class FakeExtractor:
+            def _check_rate_limit(self, domain):
+                return False
+
+            def extract_content(self, *args, **kwargs):
+                return {
+                    "title": "Wire Story",
+                    "content": "A" * 200,
+                    "author": "Associated Press",
+                    "metadata": {},
+                }
+
+            def get_driver_stats(self):
+                return {"has_persistent_driver": False}
+
+        class FakeBylineCleaner:
+            def clean_byline(self, *args, **kwargs):
+                return {
+                    "authors": ["Associated Press"],
+                    "wire_services": ["Associated Press"],
+                    "is_wire_content": True,
+                }
+
+        class FakeContentCleaner:
+            def process_single_article(self, text, domain, dry_run=False):
+                return text, {}
+
+        class FakeTelemetry:
+            def record_extraction(self, *args, **kwargs):
+                pass
+
+        class FakeMetrics:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def set_content_type_detection(self, *args):
+                pass
+
+            def finalize(self, *args):
+                pass
+
+        monkeypatch.setattr(extraction, "DatabaseManager", FakeDBManager)
+        monkeypatch.setattr(extraction, "BylineCleaner", FakeBylineCleaner)
+        monkeypatch.setattr(extraction, "ExtractionMetrics", FakeMetrics)
+        monkeypatch.setattr(extraction, "calculate_content_hash", lambda *a: "hash123")
+        monkeypatch.setattr(
+            extraction,
+            "ContentTypeDetector",
+            lambda **kw: Mock(detect=lambda **k: None),
+        )
+
+        db = FakeDBManager()
+        args = Namespace(dump_sql=False)
+        extractor = FakeExtractor()
+        byline_cleaner = FakeBylineCleaner()
+        content_cleaner = FakeContentCleaner()
+        telemetry = FakeTelemetry()
+
+        extraction._process_batch(
+            args,
+            extractor,
+            byline_cleaner,
+            content_cleaner,
+            telemetry,
+            per_batch=1,
+            batch_num=1,
+            host_403_tracker={},
+            domains_for_cleaning=defaultdict(list),
+            db=db,
+        )
+
+        assert len(db.session.insert_calls) == 1
+        assert db.session.insert_calls[0]["wire_check_status"] == "complete"
 
     def test_article_with_insufficient_content_after_cleaning_skipped(
         self, monkeypatch
@@ -528,6 +649,248 @@ class TestContentValidationLogic:
         # Verify candidate marked as extracted (don't retry empty content)
         assert len(db.session.update_calls) >= 1
 
+    def test_insufficient_content_without_paywall_commits_and_updates(
+        self, monkeypatch
+    ):
+        """Insufficient content without paywall should update status and commit."""
+
+        rows = [
+            (
+                "cand-1",
+                "https://example.com/short",
+                "example.com",
+                "article",
+                "Example",
+            )
+        ]
+
+        class FakeSession:
+            def __init__(self):
+                self.insert_calls = []
+                self.update_calls = []
+                self.commit_calls = 0
+
+            def execute(self, query, params=None):
+                query_str = str(getattr(query, "text", query))
+                if "INSERT INTO articles" in query_str:
+                    self.insert_calls.append(params)
+                elif "UPDATE candidate_links" in query_str:
+                    self.update_calls.append(params)
+                elif params and "limit_with_buffer" in params:
+                    return Mock(fetchall=lambda: rows)
+                return Mock(fetchall=lambda: [], scalar=lambda: None)
+
+            def commit(self):
+                self.commit_calls += 1
+
+            def close(self):
+                pass
+
+            def expire_all(self):
+                pass
+
+            def rollback(self):
+                pass
+
+        class FakeDBManager:
+            def __init__(self):
+                self.session = FakeSession()
+
+        class FakeExtractor:
+            def _check_rate_limit(self, domain):
+                return False
+
+            def extract_content(self, *args, **kwargs):
+                return {
+                    "title": "Short Article",
+                    "content": "abc",  # well under MIN_CONTENT_LENGTH after cleaning
+                    "author": None,
+                    "metadata": {},
+                }
+
+            def get_driver_stats(self):
+                return {"has_persistent_driver": False}
+
+        class FakeBylineCleaner:
+            def clean_byline(self, *args, **kwargs):
+                return {"authors": [], "wire_services": []}
+
+        class FakeContentCleaner:
+            def process_single_article(self, text, domain, dry_run=False):
+                # leave content untouched and under threshold with no paywall patterns
+                return text, {"patterns_matched": []}
+
+        class FakeTelemetry:
+            def record_extraction(self, *args, **kwargs):
+                pass
+
+        class FakeMetrics:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def set_content_type_detection(self, *args):
+                pass
+
+            def finalize(self, *args):
+                pass
+
+        monkeypatch.setattr(extraction, "DatabaseManager", FakeDBManager)
+        monkeypatch.setattr(extraction, "BylineCleaner", FakeBylineCleaner)
+        monkeypatch.setattr(extraction, "ExtractionMetrics", FakeMetrics)
+        monkeypatch.setattr(extraction, "calculate_content_hash", lambda *a: "hash")
+        monkeypatch.setattr(
+            extraction,
+            "ContentTypeDetector",
+            lambda **kw: Mock(detect=lambda **k: None),
+        )
+
+        db = FakeDBManager()
+        args = Namespace(dump_sql=False)
+        extractor = FakeExtractor()
+        content_cleaner = FakeContentCleaner()
+        telemetry = FakeTelemetry()
+
+        result = extraction._process_batch(
+            args,
+            extractor,
+            FakeBylineCleaner(),
+            content_cleaner,
+            telemetry,
+            per_batch=1,
+            batch_num=1,
+            host_403_tracker={},
+            domains_for_cleaning=defaultdict(list),
+            db=db,
+        )
+
+        assert result["processed"] == 0
+        assert db.session.insert_calls == []
+        assert db.session.commit_calls == 1
+        assert db.session.update_calls == [
+            {
+                "id": "cand-1",
+                "status": "extracted",
+                "error": "Insufficient content (no paywall detected)",
+            }
+        ]
+
+    def test_work_queue_insufficient_content_still_commits(self, monkeypatch):
+        """Ensure work-queue path also commits insufficient-content updates."""
+
+        class FakeSession:
+            def __init__(self):
+                self.update_calls = []
+                self.commit_calls = 0
+
+            def execute(self, query, params=None):
+                query_str = str(getattr(query, "text", query))
+                if "UPDATE candidate_links" in query_str:
+                    self.update_calls.append(params)
+                return Mock(fetchall=lambda: [], scalar=lambda: None)
+
+            def commit(self):
+                self.commit_calls += 1
+
+            def close(self):
+                pass
+
+            def expire_all(self):
+                pass
+
+            def rollback(self):
+                pass
+
+        class FakeDBManager:
+            def __init__(self):
+                self.session = FakeSession()
+
+        class FakeExtractor:
+            def _check_rate_limit(self, domain):
+                return False
+
+            def extract_content(self, *args, **kwargs):
+                return {
+                    "title": "Short Queue Article",
+                    "content": "tiny",
+                    "author": None,
+                    "metadata": {},
+                }
+
+            def get_driver_stats(self):
+                return {"has_persistent_driver": False}
+
+        class FakeBylineCleaner:
+            def clean_byline(self, *args, **kwargs):
+                return {"authors": [], "wire_services": []}
+
+        class FakeContentCleaner:
+            def process_single_article(self, text, domain, dry_run=False):
+                return text, {"patterns_matched": []}
+
+        class FakeTelemetry:
+            def record_extraction(self, *args, **kwargs):
+                pass
+
+        class FakeMetrics:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def set_content_type_detection(self, *args):
+                pass
+
+            def finalize(self, *args):
+                pass
+
+        monkeypatch.setattr(extraction, "DatabaseManager", FakeDBManager)
+        monkeypatch.setattr(extraction, "BylineCleaner", FakeBylineCleaner)
+        monkeypatch.setattr(extraction, "ExtractionMetrics", FakeMetrics)
+        monkeypatch.setattr(extraction, "calculate_content_hash", lambda *a: "hash")
+        monkeypatch.setattr(
+            extraction,
+            "ContentTypeDetector",
+            lambda **kw: Mock(detect=lambda **k: None),
+        )
+        monkeypatch.setattr(extraction, "USE_WORK_QUEUE", True)
+        monkeypatch.setattr(
+            extraction,
+            "_get_work_from_queue",
+            lambda **_: [
+                {
+                    "id": "cand-queue",
+                    "url": "https://queue.example.com/article",
+                    "source": "queue.example.com",
+                    "canonical_name": "Queue Example",
+                }
+            ],
+        )
+
+        db = FakeDBManager()
+        args = Namespace(dump_sql=False)
+        telemetry = FakeTelemetry()
+
+        result = extraction._process_batch(
+            args,
+            FakeExtractor(),
+            FakeBylineCleaner(),
+            FakeContentCleaner(),
+            telemetry,
+            per_batch=1,
+            batch_num=1,
+            host_403_tracker={},
+            domains_for_cleaning=defaultdict(list),
+            db=db,
+        )
+
+        assert result["processed"] == 0
+        assert db.session.commit_calls == 1
+        assert db.session.update_calls == [
+            {
+                "id": "cand-queue",
+                "status": "extracted",
+                "error": "Insufficient content (no paywall detected)",
+            }
+        ]
+
 
 @pytest.mark.postgres
 @pytest.mark.integration
@@ -650,3 +1013,120 @@ class TestContentValidationWithPersistentPatterns:
 
         # Verify pattern lookup was called
         mock_telemetry.get_persistent_patterns.assert_called_with("testboilerplate.com")
+
+
+@pytest.mark.postgres
+@pytest.mark.integration
+class TestInsufficientContentIntegration:
+    """Integration test covering insufficient-content branch persistence."""
+
+    def test_insufficient_content_without_paywall_updates_candidate(
+        self, cloud_sql_session, monkeypatch
+    ):
+        from datetime import datetime, timezone
+
+        from sqlalchemy import text
+
+        from src.models import CandidateLink, Source
+
+        dataset_id = "dataset-short-content"
+
+        source = Source(
+            id="source-short-content",
+            host="shortcontent.com",
+            host_norm="shortcontent.com",
+            canonical_name="Short Content News",
+            status="active",
+        )
+        cloud_sql_session.add(source)
+        cloud_sql_session.flush()
+
+        candidate = CandidateLink(
+            id="cand-short-content",
+            url="https://shortcontent.com/article",
+            source="shortcontent.com",
+            source_id=source.id,
+            dataset_id=dataset_id,
+            status="article",
+            discovered_at=datetime.now(timezone.utc),
+        )
+        cloud_sql_session.add(candidate)
+        cloud_sql_session.commit()
+
+        class FakeExtractor:
+            def _check_rate_limit(self, domain):
+                return False
+
+            def extract_content(self, *args, **kwargs):
+                return {
+                    "title": "Short Story",
+                    "content": "too short",
+                    "author": None,
+                    "metadata": {},
+                }
+
+            def get_driver_stats(self):
+                return {"has_persistent_driver": False}
+
+        class FakeBylineCleaner:
+            def clean_byline(self, *args, **kwargs):
+                return {"authors": [], "wire_services": []}
+
+        class FakeContentCleaner:
+            def process_single_article(self, text, domain, dry_run=False):
+                return text, {"patterns_matched": []}
+
+        class FakeTelemetry:
+            def record_extraction(self, *args, **kwargs):
+                pass
+
+        class FakeMetrics:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def set_content_type_detection(self, *args):
+                pass
+
+            def finalize(self, *args):
+                pass
+
+        monkeypatch.setattr(extraction, "ExtractionMetrics", FakeMetrics)
+        monkeypatch.setattr(extraction, "calculate_content_hash", lambda *a: "hash")
+        monkeypatch.setattr(
+            extraction,
+            "ContentTypeDetector",
+            lambda **kw: Mock(detect=lambda **k: None),
+        )
+
+        args = Namespace(dataset=dataset_id, dump_sql=False)
+        telemetry = FakeTelemetry()
+        domains_for_cleaning = defaultdict(list)
+
+        candidate_id = (
+            candidate.id
+        )  # _process_batch commits and detaches the original instance
+
+        extraction._process_batch(
+            args,
+            FakeExtractor(),
+            FakeBylineCleaner(),
+            FakeContentCleaner(),
+            telemetry,
+            per_batch=1,
+            batch_num=1,
+            host_403_tracker={},
+            domains_for_cleaning=domains_for_cleaning,
+            db=SimpleNamespace(session=cloud_sql_session),
+        )
+
+        cloud_sql_session.expire_all()
+        candidate = cloud_sql_session.get(CandidateLink, candidate_id)
+        assert candidate is not None
+        assert candidate.status == "extracted"
+        assert candidate.error_message == "Insufficient content (no paywall detected)"
+
+        article_count = cloud_sql_session.execute(
+            text("SELECT COUNT(*) FROM articles WHERE candidate_link_id = :id"),
+            {"id": candidate.id},
+        ).scalar()
+        assert article_count == 0
