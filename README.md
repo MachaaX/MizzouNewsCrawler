@@ -2196,3 +2196,4 @@ This project is maintained by the Local News Impact research group. See LICENSE 
 ## Acknowledgments
 
 This project builds on news crawling and analysis research from the Missouri School of Journalism and the Local News Impact initiative. Special thanks to all contributors and the open-source community for the tools and libraries that make this work possible.
+
