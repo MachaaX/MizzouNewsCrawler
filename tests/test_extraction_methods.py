@@ -1055,6 +1055,7 @@ class TestNewspaperMethod:
             mock_article.publish_date = datetime(2023, 1, 15, 10, 0, 0)
             mock_article.meta_description = "Test description"
             mock_article.keywords = ["test", "article"]
+            mock_article.html = mock_html_complete  # For wire detection
 
             mock_article_class.return_value = mock_article
 
@@ -1105,6 +1106,7 @@ class TestNewspaperMethod:
             mock_article.publish_date = None  # No date
             mock_article.meta_description = ""
             mock_article.keywords = []
+            mock_article.html = mock_html_partial  # For wire detection
 
             mock_article_class.return_value = mock_article
 
