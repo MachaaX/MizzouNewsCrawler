@@ -13,6 +13,7 @@ import threading
 import time
 from copy import deepcopy
 from datetime import datetime
+from html import unescape
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -115,6 +116,27 @@ except ImportError:
     logging.warning("selenium-stealth not available, using basic stealth mode")
 
 logger = logging.getLogger(__name__)
+
+
+_HEARST_SOURCE_ASSIGNMENT_RE = re.compile(
+    r"window\.HRST\.article\.sourceName\s*=\s*['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_HEARST_SOURCE_JSON_BLOCK_RE = re.compile(
+    r"window\.HRST\.article\s*=\s*({.*?})\s*;",
+    re.IGNORECASE | re.DOTALL,
+)
+_HEARST_SOURCE_VALUE_RE = re.compile(r'"sourceName"\s*:\s*"([^\"]+)"', re.IGNORECASE)
+
+# Gannett/USA Today JSON-LD patterns
+_GANNETT_JSONLD_BLOCK_RE = re.compile(
+    r'<script\s+type\s*=\s*["\']?application/ld\+json["\']?\s*>([^<]+)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
+_GANNETT_WIRE_PUBLISHERS = {
+    "usa today",
+    "usatoday",
+}
 
 
 def _ensure_attrs_dict(attrs: object) -> dict:
@@ -400,6 +422,9 @@ class ContentExtractor:
         self.mcmetadata_include_other_metadata = os.getenv(
             "MCMETADATA_INCLUDE_OTHER", "true"
         ).lower() in ("1", "true", "yes", "on")
+
+        # Reset per-extraction hints
+        self._latest_wire_hints: Dict[str, Any] | None = None
 
         if self.use_mcmetadata and not MCMETADATA_AVAILABLE:
             logger.warning(
@@ -1188,6 +1213,7 @@ class ContentExtractor:
 
         # Reset publish-date detail tracking for this article
         self._publish_date_details = None
+        self._latest_wire_hints = None
 
         # Initialize result structure
         result: Dict[str, Any] = {
@@ -1429,6 +1455,20 @@ class ContentExtractor:
         # Clean up the flag if extraction succeeded
         result.pop("_bot_protection_detected", None)
 
+        if self._latest_wire_hints:
+            metadata = result.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                result["metadata"] = metadata
+
+            existing_hints = metadata.get("wire_hints")
+            if isinstance(existing_hints, dict):
+                metadata["wire_hints"] = self._merge_wire_hints(
+                    existing_hints, self._latest_wire_hints
+                )
+            else:
+                metadata["wire_hints"] = deepcopy(self._latest_wire_hints)
+
         # Apply URL-based publish date fallback when all methods fail
         if not result.get("publish_date"):
             url_fallback = self._extract_publish_date_from_url(url)
@@ -1473,6 +1513,9 @@ class ContentExtractor:
         result_copy["metadata"]["extraction_methods"] = result["extraction_methods"]
         result_copy["metadata"]["extraction_method"] = primary_method
         del result_copy["extraction_methods"]
+
+        # Prevent hints from leaking across articles
+        self._latest_wire_hints = None
 
         return result_copy
 
@@ -1691,6 +1734,9 @@ class ContentExtractor:
             include_other_metadata=include_other,
             stats_accumulator=stats_accumulator,
         )
+
+        raw_html_snapshot = mc_result.pop("raw_html", None)
+        self._update_wire_hints_from_html(raw_html_snapshot)
 
         text_content = mc_result.get("text_content")
         if isinstance(text_content, bytes):
@@ -1998,6 +2044,8 @@ class ContentExtractor:
         if hasattr(article, "publish_date") and article.publish_date:
             publish_date = article.publish_date.isoformat()
 
+        self._update_wire_hints_from_html(getattr(article, "html", None))
+
         return {
             "url": url,
             "title": article.title,
@@ -2094,6 +2142,8 @@ class ContentExtractor:
                 logger.warning(f"Failed to fetch page for extraction {url}: {e}")
                 return {}
 
+        self._update_wire_hints_from_html(page_html)
+
         raw = self.extract_article_data(page_html, url)
 
         # Normalize publish_date key: prefer `published_date` but expose
@@ -2136,6 +2186,8 @@ class ContentExtractor:
 
             # Extract content after ensuring page is loaded
             html = driver.page_source
+
+            self._update_wire_hints_from_html(html)
 
             # Stop page load immediately after getting HTML to prevent
             # waiting for slow ads/trackers (fixes 147s timeout issue)
@@ -2762,6 +2814,257 @@ class ContentExtractor:
                         return author_txt
 
         return None
+
+    def _update_wire_hints_from_html(self, html_text: str | bytes | None) -> None:
+        """Update wire detection hints by inspecting raw HTML."""
+        if not html_text:
+            return
+
+        if isinstance(html_text, bytes):
+            try:
+                decoded = html_text.decode("utf-8", errors="ignore")
+            except Exception:
+                decoded = html_text.decode(errors="ignore")
+            html_str = decoded
+        else:
+            html_str = html_text
+
+        # Try Hearst detection
+        hearst_hints = self._detect_hearst_wire_from_html(html_str)
+
+        # Try Gannett/USA Today detection
+        gannett_hints = self._detect_gannett_wire_from_html(html_str)
+
+        # Merge all hints
+        hints = None
+        if hearst_hints and gannett_hints:
+            hints = self._merge_wire_hints(hearst_hints, gannett_hints)
+        elif hearst_hints:
+            hints = hearst_hints
+        elif gannett_hints:
+            hints = gannett_hints
+
+        if not hints:
+            return
+
+        if not self._latest_wire_hints:
+            self._latest_wire_hints = hints
+            return
+
+        self._latest_wire_hints = self._merge_wire_hints(self._latest_wire_hints, hints)
+
+    def _merge_wire_hints(
+        self, existing: Dict[str, Any], new_hint: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Merge wire hint dictionaries while deduplicating services and sources."""
+        merged: Dict[str, Any] = dict(existing)
+
+        existing_services = existing.get("wire_services")
+        if isinstance(existing_services, list):
+            existing_services_list = list(existing_services)
+        elif existing_services:
+            existing_services_list = [existing_services]
+        else:
+            existing_services_list = []
+        new_services = [svc for svc in (new_hint.get("wire_services") or []) if svc]
+        for svc in new_services:
+            if svc not in existing_services_list:
+                existing_services_list.append(svc)
+        if existing_services_list:
+            merged["wire_services"] = existing_services_list
+
+        existing_sources = existing.get("raw_source_name")
+        if isinstance(existing_sources, list):
+            existing_sources_list = list(existing_sources)
+        elif existing_sources:
+            existing_sources_list = [existing_sources]
+        else:
+            existing_sources_list = []
+        new_source = new_hint.get("raw_source_name")
+        if isinstance(new_source, list):
+            candidates = [src for src in new_source if src]
+        elif new_source:
+            candidates = [new_source]
+        else:
+            candidates = []
+
+        for src in candidates:
+            if src not in existing_sources_list:
+                existing_sources_list.append(src)
+        if existing_sources_list:
+            merged["raw_source_name"] = existing_sources_list
+
+        existing_detectors = existing.get("detected_by")
+        if isinstance(existing_detectors, list):
+            detectors = set(existing_detectors)
+        elif existing_detectors:
+            detectors = {existing_detectors}
+        else:
+            detectors = set()
+
+        new_detected_by = new_hint.get("detected_by")
+        if isinstance(new_detected_by, list):
+            detectors.update(det for det in new_detected_by if det)
+        elif new_detected_by:
+            detectors.add(new_detected_by)
+
+        if detectors:
+            merged["detected_by"] = list(detectors)
+
+        return merged
+
+    def _detect_hearst_wire_from_html(self, html_text: str) -> Dict[str, Any] | None:
+        """Detect Hearst inline sourceName assignments for wire identification."""
+        if "window.HRST" not in html_text:
+            return None
+
+        raw_source: str | None = None
+
+        assignment_match = _HEARST_SOURCE_ASSIGNMENT_RE.search(html_text)
+        if assignment_match:
+            raw_source = unescape(assignment_match.group(1).strip())
+        else:
+            for block_match in _HEARST_SOURCE_JSON_BLOCK_RE.finditer(html_text):
+                block = block_match.group(1)
+                value_match = _HEARST_SOURCE_VALUE_RE.search(block)
+                if value_match:
+                    raw_source = unescape(value_match.group(1).strip())
+                    break
+
+            if not raw_source:
+                for value_match in _HEARST_SOURCE_VALUE_RE.finditer(html_text):
+                    context_start = max(0, value_match.start() - 200)
+                    context_end = min(len(html_text), value_match.end() + 200)
+                    context = html_text[context_start:context_end]
+                    if "window.HRST" in context:
+                        raw_source = unescape(value_match.group(1).strip())
+                        break
+
+        if not raw_source:
+            return None
+
+        normalized = self._normalize_wire_service_name(raw_source)
+        if not normalized:
+            return None
+
+        return {
+            "detected_by": ["hearst_source_name"],
+            "raw_source_name": [raw_source],
+            "wire_services": [normalized],
+        }
+
+    def _detect_gannett_wire_from_html(self, html_text: str) -> Dict[str, Any] | None:
+        """Detect Gannett/USA Today syndication via JSON-LD syndication signals.
+
+        Gannett properties (news-leader.com, etc.) embed JSON-LD. We look for
+        signals that indicate the article is **syndicated from USA Today**,
+        not just that the site is part of the USA Today Network:
+
+        - isBasedOn pointing to usatoday.com (republished content)
+        - mainEntityOfPage.@id pointing to usatoday.com (canonical is USA Today)
+        - metadata.contentSourceCode = "USAT" (origin is USA Today)
+
+        NOTE: publisher.name = "USA TODAY" appears on ALL Gannett sites and is
+        NOT a reliable syndication signal — it just means they're in the network.
+        """
+        if "application/ld+json" not in html_text:
+            return None
+
+        raw_source: str | None = None
+        detection_evidence: list[str] = []
+        has_syndication_signal = False
+
+        for block_match in _GANNETT_JSONLD_BLOCK_RE.finditer(html_text):
+            try:
+                block_text = block_match.group(1).strip()
+                data = json.loads(block_text)
+
+                # Handle array of JSON-LD objects
+                if isinstance(data, list):
+                    items = data
+                else:
+                    items = [data]
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+
+                    # Check isBasedOn (indicates republished content from another site)
+                    is_based_on = item.get("isBasedOn", "")
+                    if is_based_on and "usatoday.com" in is_based_on.lower():
+                        has_syndication_signal = True
+                        detection_evidence.append(f"isBasedOn={is_based_on[:80]}")
+                        raw_source = "USA Today"
+
+                    # Check mainEntityOfPage.@id (canonical URL is on usatoday.com)
+                    main_entity = item.get("mainEntityOfPage")
+                    if isinstance(main_entity, dict):
+                        entity_id = main_entity.get("@id", "")
+                        if entity_id and "usatoday.com" in entity_id.lower():
+                            has_syndication_signal = True
+                            detection_evidence.append(
+                                f"mainEntityOfPage={entity_id[:80]}"
+                            )
+                            if not raw_source:
+                                raw_source = "USA Today"
+
+                    # Check embedded metadata.contentSourceCode = "USAT"
+                    metadata_str = item.get("metadata", "")
+                    if isinstance(metadata_str, str) and metadata_str:
+                        try:
+                            meta_obj = json.loads(metadata_str)
+                            source_code = meta_obj.get("contentSourceCode", "")
+                            if source_code == "USAT":
+                                has_syndication_signal = True
+                                detection_evidence.append(
+                                    f"contentSourceCode={source_code}"
+                                )
+                                if not raw_source:
+                                    raw_source = "USA Today"
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        # Only return if we found actual syndication signals, not just network membership
+        if not has_syndication_signal or not raw_source:
+            return None
+
+        normalized = self._normalize_wire_service_name(raw_source)
+        if not normalized:
+            return None
+
+        return {
+            "detected_by": ["gannett_jsonld"],
+            "raw_source_name": [raw_source],
+            "wire_services": [normalized],
+            "evidence": detection_evidence,
+        }
+
+    def _normalize_wire_service_name(self, source_name: str | None) -> str | None:
+        """Normalize raw source names to canonical wire services we track."""
+        if not source_name:
+            return None
+
+        normalized_map = {
+            "associated press": "The Associated Press",
+            "the associated press": "The Associated Press",
+            "ap": "The Associated Press",
+            "ap news": "The Associated Press",
+            "apnews": "The Associated Press",
+            "reuters": "Reuters",
+            "bloomberg": "Bloomberg",
+            "agence france-presse": "Agence France-Presse",
+            "agence france presse": "Agence France-Presse",
+            "afp": "Agence France-Presse",
+            "tribune news service": "Tribune News Service",
+            "usa today": "USA Today",
+            "usatoday": "USA Today",
+        }
+
+        lookup_key = source_name.strip().lower()
+        return normalized_map.get(lookup_key)
 
     def _record_publish_date_details(
         self, source: str, details: Optional[Dict[str, Any]] = None

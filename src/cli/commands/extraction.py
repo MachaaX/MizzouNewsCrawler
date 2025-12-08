@@ -1079,6 +1079,8 @@ def _process_batch(
                     wire_service_info = None
                     article_status = "extracted"
                     byline_result = None
+                    wire_services: list[str] = []
+                    is_wire_content = False
 
                     if raw_author:
                         # Get full JSON result with wire service detection
@@ -1120,6 +1122,81 @@ def _process_batch(
                     metadata_value = content.get("metadata") or {}
                     if not isinstance(metadata_value, dict):
                         metadata_value = {}
+
+                    if article_status != "wire":
+                        wire_hints = metadata_value.get("wire_hints")
+                        if isinstance(wire_hints, dict):
+                            hint_services = [
+                                svc
+                                for svc in wire_hints.get("wire_services", [])
+                                if svc
+                            ]
+                            if hint_services:
+                                combined_services = []
+                                for svc in wire_services + hint_services:
+                                    if svc and svc not in combined_services:
+                                        combined_services.append(svc)
+                                if not combined_services:
+                                    combined_services = hint_services
+
+                                wire_services = combined_services
+                                article_status = "wire"
+                                wire_service_info = json.dumps(combined_services)
+
+                                wire_hints["wire_services"] = combined_services
+
+                                detection_details = metadata_value.setdefault(
+                                    "wire_detection", {}
+                                )
+
+                                # Determine detection source (Hearst vs Gannett)
+                                detected_by_list = wire_hints.get("detected_by", [])
+                                if "gannett_jsonld" in detected_by_list:
+                                    detection_key = "gannett_jsonld"
+                                else:
+                                    detection_key = "hearst_source_name"
+
+                                detection_details[detection_key] = {
+                                    "raw_source_name": wire_hints.get(
+                                        "raw_source_name"
+                                    ),
+                                    "wire_services": combined_services,
+                                    "detected_by": detected_by_list,
+                                    "evidence": wire_hints.get("evidence"),
+                                    "detected_at": datetime.utcnow().isoformat(),
+                                }
+
+                                if byline_result:
+                                    existing_services = list(
+                                        byline_result.get("wire_services") or []
+                                    )
+                                    for svc in combined_services:
+                                        if svc not in existing_services:
+                                            existing_services.append(svc)
+                                    byline_result["wire_services"] = existing_services
+                                    byline_result["is_wire_content"] = True
+                                    if existing_services and not byline_result.get(
+                                        "primary_wire_service"
+                                    ):
+                                        byline_result["primary_wire_service"] = (
+                                            existing_services[0]
+                                        )
+                                else:
+                                    byline_result = {
+                                        "authors": [],
+                                        "count": 0,
+                                        "primary_author": None,
+                                        "has_multiple_authors": False,
+                                        "wire_services": combined_services,
+                                        "is_wire_content": True,
+                                        "primary_wire_service": combined_services[0],
+                                    }
+
+                                logger.info(
+                                    "Wire detected via %s: wire=%s",
+                                    detection_key,
+                                    combined_services,
+                                )
 
                     if byline_result:
                         metadata_value["byline"] = byline_result
