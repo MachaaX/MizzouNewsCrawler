@@ -11,9 +11,9 @@ import re
 import sys
 import threading
 import time
-from html import unescape
 from copy import deepcopy
 from datetime import datetime
+from html import unescape
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -2853,7 +2853,9 @@ class ContentExtractor:
 
         self._latest_wire_hints = self._merge_wire_hints(self._latest_wire_hints, hints)
 
-    def _merge_wire_hints(self, existing: Dict[str, Any], new_hint: Dict[str, Any]) -> Dict[str, Any]:
+    def _merge_wire_hints(
+        self, existing: Dict[str, Any], new_hint: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Merge wire hint dictionaries while deduplicating services and sources."""
         merged: Dict[str, Any] = dict(existing)
 
@@ -3000,7 +3002,9 @@ class ContentExtractor:
                         entity_id = main_entity.get("@id", "")
                         if entity_id and "usatoday.com" in entity_id.lower():
                             has_syndication_signal = True
-                            detection_evidence.append(f"mainEntityOfPage={entity_id[:80]}")
+                            detection_evidence.append(
+                                f"mainEntityOfPage={entity_id[:80]}"
+                            )
                             if not raw_source:
                                 raw_source = "USA Today"
 
@@ -3012,7 +3016,9 @@ class ContentExtractor:
                             source_code = meta_obj.get("contentSourceCode", "")
                             if source_code == "USAT":
                                 has_syndication_signal = True
-                                detection_evidence.append(f"contentSourceCode={source_code}")
+                                detection_evidence.append(
+                                    f"contentSourceCode={source_code}"
+                                )
                                 if not raw_source:
                                     raw_source = "USA Today"
                         except (json.JSONDecodeError, TypeError):

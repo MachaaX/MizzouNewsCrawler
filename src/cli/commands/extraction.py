@@ -1127,7 +1127,9 @@ def _process_batch(
                         wire_hints = metadata_value.get("wire_hints")
                         if isinstance(wire_hints, dict):
                             hint_services = [
-                                svc for svc in wire_hints.get("wire_services", []) if svc
+                                svc
+                                for svc in wire_hints.get("wire_services", [])
+                                if svc
                             ]
                             if hint_services:
                                 combined_services = []
@@ -1155,7 +1157,9 @@ def _process_batch(
                                     detection_key = "hearst_source_name"
 
                                 detection_details[detection_key] = {
-                                    "raw_source_name": wire_hints.get("raw_source_name"),
+                                    "raw_source_name": wire_hints.get(
+                                        "raw_source_name"
+                                    ),
                                     "wire_services": combined_services,
                                     "detected_by": detected_by_list,
                                     "evidence": wire_hints.get("evidence"),
@@ -1174,7 +1178,9 @@ def _process_batch(
                                     if existing_services and not byline_result.get(
                                         "primary_wire_service"
                                     ):
-                                        byline_result["primary_wire_service"] = existing_services[0]
+                                        byline_result["primary_wire_service"] = (
+                                            existing_services[0]
+                                        )
                                 else:
                                     byline_result = {
                                         "authors": [],
@@ -1187,7 +1193,9 @@ def _process_batch(
                                     }
 
                                 logger.info(
-                                    "Wire detected via %s: wire=%s", detection_key, combined_services
+                                    "Wire detected via %s: wire=%s",
+                                    detection_key,
+                                    combined_services,
                                 )
 
                     if byline_result:
