@@ -193,6 +193,8 @@ def extract(
         is_shortened=is_shortened_url,
         version=__version__,
     )
+    # Provide raw_html so callers can run downstream heuristics (e.g., script parsing)
+    results["raw_html"] = raw_html
     if use_other_metadata:
         # other metadata we've done less robust validation on, but might be useful
         results["other"] = dict(
