@@ -37,9 +37,15 @@ class TestNexstarMetadataExtraction:
         extractor._extract_cms_metadata_from_html(html)
 
         assert extractor._latest_cms_metadata is not None
-        assert extractor._latest_cms_metadata.get("title") == "Fire District warns public not to burn"
+        assert (
+            extractor._latest_cms_metadata.get("title")
+            == "Fire District warns public not to burn"
+        )
         assert extractor._latest_cms_metadata.get("author") == "John Smith"
-        assert extractor._latest_cms_metadata.get("publish_date") == "2025-12-09T12:17:04-06:00"
+        assert (
+            extractor._latest_cms_metadata.get("publish_date")
+            == "2025-12-09T12:17:04-06:00"
+        )
         assert extractor._latest_cms_metadata.get("category") == "Local News"
         assert extractor._latest_cms_metadata.get("cms_source") == "nexstar"
 
@@ -58,7 +64,10 @@ class TestNexstarMetadataExtraction:
 
         assert extractor._latest_cms_metadata is not None
         # Unicode \u00a0 is non-breaking space
-        assert "Fire District warns public about burning" in extractor._latest_cms_metadata.get("title", "")
+        assert (
+            "Fire District warns public about burning"
+            in extractor._latest_cms_metadata.get("title", "")
+        )
 
     def test_ignores_empty_fields(self, extractor):
         """Test that empty fields are not stored."""
@@ -101,7 +110,9 @@ class TestJsonLdMetadataExtraction:
         assert extractor._latest_cms_metadata is not None
         assert extractor._latest_cms_metadata.get("title") == "Breaking News Story"
         assert extractor._latest_cms_metadata.get("author") == "Reporter Name"
-        assert extractor._latest_cms_metadata.get("publish_date") == "2025-12-09T10:00:00Z"
+        assert (
+            extractor._latest_cms_metadata.get("publish_date") == "2025-12-09T10:00:00Z"
+        )
         assert extractor._latest_cms_metadata.get("cms_source") == "json_ld"
 
     def test_extracts_author_from_array(self, extractor):
@@ -264,7 +275,9 @@ class TestMetaTagExtraction:
 
         assert extractor._latest_cms_metadata is not None
         assert extractor._latest_cms_metadata.get("author") == "Jane Reporter"
-        assert extractor._latest_cms_metadata.get("publish_date") == "2025-12-09T12:00:00Z"
+        assert (
+            extractor._latest_cms_metadata.get("publish_date") == "2025-12-09T12:00:00Z"
+        )
 
     def test_handles_alternate_meta_order(self, extractor):
         """Test meta tags with content before property."""
@@ -318,7 +331,9 @@ class TestDataLayerExtraction:
         extractor._extract_cms_metadata_from_html(html)
 
         assert extractor._latest_cms_metadata is not None
-        assert extractor._latest_cms_metadata.get("title") == "Page Title from DataLayer"
+        assert (
+            extractor._latest_cms_metadata.get("title") == "Page Title from DataLayer"
+        )
         assert extractor._latest_cms_metadata.get("author") == "Byline Author"
 
     def test_jsonld_preferred_over_datalayer(self, extractor):
@@ -339,4 +354,3 @@ class TestDataLayerExtraction:
         assert extractor._latest_cms_metadata.get("title") == "JSON-LD Headline"
         assert extractor._latest_cms_metadata.get("author") == "JSON Author"
         assert extractor._latest_cms_metadata.get("cms_source") == "json_ld"
-

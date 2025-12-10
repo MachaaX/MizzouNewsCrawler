@@ -231,14 +231,14 @@ _WIRE_SERVICE_DOMAINS = {
 # Nexstar Media (NXSTdata.content) - used by many TV stations
 # window.NXSTdata.content = Object.assign(window.NXSTdata.content, {...})
 _NXST_CONTENT_RE = re.compile(
-    r'window\.NXSTdata\.content\s*=\s*Object\.assign\s*\(\s*'
-    r'window\.NXSTdata\.content\s*,\s*(\{[^}]+\})\s*\)',
+    r"window\.NXSTdata\.content\s*=\s*Object\.assign\s*\(\s*"
+    r"window\.NXSTdata\.content\s*,\s*(\{[^}]+\})\s*\)",
     re.IGNORECASE | re.DOTALL,
 )
 
 # Generic window.__DATA__ or window.pageData patterns
 _WINDOW_DATA_RE = re.compile(
-    r'window\.__(?:INITIAL_)?DATA__\s*=\s*(\{.*?\});?\s*(?:</script>|$)',
+    r"window\.__(?:INITIAL_)?DATA__\s*=\s*(\{.*?\});?\s*(?:</script>|$)",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -1598,7 +1598,9 @@ class ContentExtractor:
             # Fill in missing title from CMS data
             if not result.get("title") and cms_meta.get("title"):
                 result["title"] = cms_meta["title"]
-                result["extraction_methods"]["title"] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+                result["extraction_methods"][
+                    "title"
+                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
                 logger.info(
                     "Title filled from CMS metadata (%s): %s",
                     cms_meta.get("cms_source"),
@@ -1608,7 +1610,9 @@ class ContentExtractor:
             # Fill in missing author from CMS data
             if not result.get("author") and cms_meta.get("author"):
                 result["author"] = cms_meta["author"]
-                result["extraction_methods"]["author"] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+                result["extraction_methods"][
+                    "author"
+                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
                 logger.info(
                     "Author filled from CMS metadata (%s): %s",
                     cms_meta.get("cms_source"),
@@ -1618,7 +1622,9 @@ class ContentExtractor:
             # Fill in missing publish_date from CMS data
             if not result.get("publish_date") and cms_meta.get("publish_date"):
                 result["publish_date"] = cms_meta["publish_date"]
-                result["extraction_methods"]["publish_date"] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+                result["extraction_methods"][
+                    "publish_date"
+                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
 
             # Store CMS metadata source in result metadata for debugging
             metadata["cms_metadata_source"] = cms_meta.get("cms_source")
@@ -3049,8 +3055,12 @@ class ContentExtractor:
                             item_type = item_type[0] if item_type else ""
                         # Only process article-like types
                         if item_type and item_type.lower() not in (
-                            "newsarticle", "article", "reportagenewsarticle",
-                            "webpage", "blogposting", "socialmediaposting"
+                            "newsarticle",
+                            "article",
+                            "reportagenewsarticle",
+                            "webpage",
+                            "blogposting",
+                            "socialmediaposting",
                         ):
                             continue
 
@@ -3069,9 +3079,8 @@ class ContentExtractor:
 
                         # Get datePublished
                         if not metadata.get("publish_date"):
-                            pub_date = (
-                                item.get("datePublished")
-                                or item.get("dateCreated")
+                            pub_date = item.get("datePublished") or item.get(
+                                "dateCreated"
                             )
                             if pub_date:
                                 metadata["publish_date"] = pub_date
@@ -3097,12 +3106,14 @@ class ContentExtractor:
             # og:title
             og_title_match = re.search(
                 r'<meta\s+(?:property|name)=["\']og:title["\']\s+content=["\']([^"\']+)["\']',
-                html_text, re.IGNORECASE
+                html_text,
+                re.IGNORECASE,
             )
             if not og_title_match:
                 og_title_match = re.search(
                     r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']og:title["\']',
-                    html_text, re.IGNORECASE
+                    html_text,
+                    re.IGNORECASE,
                 )
             if og_title_match:
                 metadata["title"] = og_title_match.group(1).strip()
@@ -3113,12 +3124,14 @@ class ContentExtractor:
             # article:author or author meta tag
             author_match = re.search(
                 r'<meta\s+(?:property|name)=["\'](?:article:author|author)["\']\s+content=["\']([^"\']+)["\']',
-                html_text, re.IGNORECASE
+                html_text,
+                re.IGNORECASE,
             )
             if not author_match:
                 author_match = re.search(
                     r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\'](?:article:author|author)["\']',
-                    html_text, re.IGNORECASE
+                    html_text,
+                    re.IGNORECASE,
                 )
             if author_match:
                 metadata["author"] = author_match.group(1).strip()
@@ -3129,12 +3142,14 @@ class ContentExtractor:
             # article:published_time
             pubdate_match = re.search(
                 r'<meta\s+(?:property|name)=["\']article:published_time["\']\s+content=["\']([^"\']+)["\']',
-                html_text, re.IGNORECASE
+                html_text,
+                re.IGNORECASE,
             )
             if not pubdate_match:
                 pubdate_match = re.search(
                     r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']article:published_time["\']',
-                    html_text, re.IGNORECASE
+                    html_text,
+                    re.IGNORECASE,
                 )
             if pubdate_match:
                 metadata["publish_date"] = pubdate_match.group(1).strip()
@@ -3146,8 +3161,9 @@ class ContentExtractor:
             # Look for dataLayer.push with article metadata
             # Common fields: articleTitle, articleAuthor, pageTitle, author
             datalayer_matches = re.findall(
-                r'dataLayer\.push\s*\(\s*(\{[^}]*\})\s*\)',
-                html_text, re.IGNORECASE | re.DOTALL
+                r"dataLayer\.push\s*\(\s*(\{[^}]*\})\s*\)",
+                html_text,
+                re.IGNORECASE | re.DOTALL,
             )
             for dl_json in datalayer_matches:
                 try:
@@ -3195,7 +3211,9 @@ class ContentExtractor:
                             metadata["author"] = data["authorName"].strip()
                         if not metadata.get("description") and data.get("description"):
                             metadata["description"] = data["description"].strip()
-                        if not metadata.get("publish_date") and data.get("publicationDate"):
+                        if not metadata.get("publish_date") and data.get(
+                            "publicationDate"
+                        ):
                             metadata["publish_date"] = data["publicationDate"]
                         if not metadata.get("category") and data.get("primaryCategory"):
                             metadata["category"] = data["primaryCategory"]
@@ -3220,10 +3238,7 @@ class ContentExtractor:
                         )
                         if isinstance(content, dict):
                             if not metadata.get("title"):
-                                title = (
-                                    content.get("title")
-                                    or content.get("headline")
-                                )
+                                title = content.get("title") or content.get("headline")
                                 if title and isinstance(title, str):
                                     metadata["title"] = title.strip()
                             if not metadata.get("author"):
@@ -3244,7 +3259,10 @@ class ContentExtractor:
             if self._latest_cms_metadata:
                 # Merge, preferring existing values
                 for key, value in metadata.items():
-                    if key not in self._latest_cms_metadata or not self._latest_cms_metadata[key]:
+                    if (
+                        key not in self._latest_cms_metadata
+                        or not self._latest_cms_metadata[key]
+                    ):
                         self._latest_cms_metadata[key] = value
             else:
                 self._latest_cms_metadata = metadata
