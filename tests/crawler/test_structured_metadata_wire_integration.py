@@ -158,7 +158,8 @@ class TestStructuredMetadataWithDBPatterns:
 
         assert result is not None
         assert "jsonld_author" in result["detected_by"]
-        assert "AFP" in result["wire_services"]
+        # ContentExtractor normalizes "AFP" to canonical "Agence France-Presse"
+        assert "Agence France-Presse" in result["wire_services"]
 
     def test_jsonld_author_string_format(
         self, extractor, populated_wire_services_for_metadata

@@ -225,6 +225,29 @@ _WIRE_SERVICE_DOMAINS = {
     "latimes.com": "Los Angeles Times",
 }
 
+# CMS-specific JavaScript data object patterns for content metadata extraction
+# These capture title, author, and other fields from CMS JavaScript objects
+
+# Nexstar Media (NXSTdata.content) - used by many TV stations
+# window.NXSTdata.content = Object.assign(window.NXSTdata.content, {...})
+_NXST_CONTENT_RE = re.compile(
+    r'window\.NXSTdata\.content\s*=\s*Object\.assign\s*\(\s*'
+    r'window\.NXSTdata\.content\s*,\s*(\{[^}]+\})\s*\)',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Generic window.__DATA__ or window.pageData patterns
+_WINDOW_DATA_RE = re.compile(
+    r'window\.__(?:INITIAL_)?DATA__\s*=\s*(\{.*?\});?\s*(?:</script>|$)',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Gray Television dataLayer.push pattern
+_GRAY_DATALAYER_RE = re.compile(
+    r'dataLayer\.push\s*\(\s*(\{[^}]*"articleTitle"[^}]*\})\s*\)',
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 def _ensure_attrs_dict(attrs: object) -> dict:
     """Coerce BeautifulSoup `attrs` argument into a dict suitable for
@@ -512,6 +535,9 @@ class ContentExtractor:
 
         # Reset per-extraction hints
         self._latest_wire_hints: Dict[str, Any] | None = None
+
+        # CMS metadata extracted from JavaScript data objects (title, author, etc.)
+        self._latest_cms_metadata: Dict[str, Any] | None = None
 
         # Cache for wire author patterns from DB (5 min TTL)
         self._wire_author_patterns_cache: list[tuple[str, str, bool]] = []
@@ -1305,6 +1331,7 @@ class ContentExtractor:
         # Reset publish-date detail tracking for this article
         self._publish_date_details = None
         self._latest_wire_hints = None
+        self._latest_cms_metadata = None
 
         # Initialize result structure
         result: Dict[str, Any] = {
@@ -1560,6 +1587,44 @@ class ContentExtractor:
             else:
                 metadata["wire_hints"] = deepcopy(self._latest_wire_hints)
 
+        # Apply CMS metadata fallback for missing title/author
+        if self._latest_cms_metadata:
+            cms_meta = self._latest_cms_metadata
+            metadata = result.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                result["metadata"] = metadata
+
+            # Fill in missing title from CMS data
+            if not result.get("title") and cms_meta.get("title"):
+                result["title"] = cms_meta["title"]
+                result["extraction_methods"]["title"] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+                logger.info(
+                    "Title filled from CMS metadata (%s): %s",
+                    cms_meta.get("cms_source"),
+                    cms_meta["title"][:50] if cms_meta["title"] else None,
+                )
+
+            # Fill in missing author from CMS data
+            if not result.get("author") and cms_meta.get("author"):
+                result["author"] = cms_meta["author"]
+                result["extraction_methods"]["author"] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+                logger.info(
+                    "Author filled from CMS metadata (%s): %s",
+                    cms_meta.get("cms_source"),
+                    cms_meta["author"],
+                )
+
+            # Fill in missing publish_date from CMS data
+            if not result.get("publish_date") and cms_meta.get("publish_date"):
+                result["publish_date"] = cms_meta["publish_date"]
+                result["extraction_methods"]["publish_date"] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+
+            # Store CMS metadata source in result metadata for debugging
+            metadata["cms_metadata_source"] = cms_meta.get("cms_source")
+            if cms_meta.get("category"):
+                metadata["cms_category"] = cms_meta["category"]
+
         # Apply URL-based publish date fallback when all methods fail
         if not result.get("publish_date"):
             url_fallback = self._extract_publish_date_from_url(url)
@@ -1607,6 +1672,7 @@ class ContentExtractor:
 
         # Prevent hints from leaking across articles
         self._latest_wire_hints = None
+        self._latest_cms_metadata = None
 
         return result_copy
 
@@ -2922,6 +2988,9 @@ class ContentExtractor:
         else:
             html_str = html_text
 
+        # Extract CMS content metadata (title, author) from JavaScript objects
+        self._extract_cms_metadata_from_html(html_str)
+
         # Try generic structured metadata detection (includes JSON-LD signals)
         structured_hints = self._detect_structured_metadata_wire_from_html(
             html_str, article_url
@@ -2948,6 +3017,110 @@ class ContentExtractor:
             return
 
         self._latest_wire_hints = self._merge_wire_hints(self._latest_wire_hints, hints)
+
+    def _extract_cms_metadata_from_html(self, html_text: str) -> None:
+        """Extract content metadata from CMS JavaScript data objects.
+
+        Captures title, author, description, and publication date from
+        CMS-specific JavaScript objects like NXSTdata.content (Nexstar),
+        dataLayer (Gray TV), and window.__DATA__ patterns.
+
+        This metadata can fill in gaps when standard extraction fails.
+        """
+        metadata: Dict[str, Any] = {}
+
+        # 1. Try Nexstar NXSTdata.content pattern
+        nxst_match = _NXST_CONTENT_RE.search(html_text)
+        if nxst_match:
+            try:
+                # Parse the JSON-like object (may need cleanup)
+                json_str = nxst_match.group(1)
+                # Fix common issues: trailing commas, unquoted keys
+                data = json.loads(json_str)
+                if isinstance(data, dict):
+                    if data.get("title"):
+                        metadata["title"] = data["title"]
+                    if data.get("authorName"):
+                        metadata["author"] = data["authorName"]
+                    if data.get("description"):
+                        metadata["description"] = data["description"]
+                    if data.get("publicationDate"):
+                        metadata["publish_date"] = data["publicationDate"]
+                    if data.get("primaryCategory"):
+                        metadata["category"] = data["primaryCategory"]
+                    metadata["cms_source"] = "nexstar"
+                    logger.debug(
+                        f"Extracted Nexstar CMS metadata: title={data.get('title')}, "
+                        f"author={data.get('authorName')}"
+                    )
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.debug(f"Failed to parse NXSTdata.content: {e}")
+
+        # 2. Try Gray TV dataLayer pattern
+        if not metadata.get("title"):
+            gray_match = _GRAY_DATALAYER_RE.search(html_text)
+            if gray_match:
+                try:
+                    json_str = gray_match.group(1)
+                    data = json.loads(json_str)
+                    if isinstance(data, dict):
+                        if data.get("articleTitle"):
+                            metadata["title"] = data["articleTitle"]
+                        if data.get("articleAuthor"):
+                            metadata["author"] = data["articleAuthor"]
+                        metadata["cms_source"] = "gray_tv"
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # 3. Try JSON-LD for title/author if not found yet
+        if not metadata.get("title") or not metadata.get("author"):
+            jsonld_match = _GANNETT_JSONLD_BLOCK_RE.search(html_text)
+            if jsonld_match:
+                try:
+                    data = json.loads(jsonld_match.group(1))
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        # Get headline/title
+                        if not metadata.get("title"):
+                            headline = item.get("headline") or item.get("name")
+                            if headline and isinstance(headline, str):
+                                metadata["title"] = headline
+                        # Get author
+                        if not metadata.get("author"):
+                            author = item.get("author")
+                            if isinstance(author, str):
+                                metadata["author"] = author
+                            elif isinstance(author, dict):
+                                metadata["author"] = author.get("name")
+                            elif isinstance(author, list) and author:
+                                # Take first author
+                                first = author[0]
+                                if isinstance(first, str):
+                                    metadata["author"] = first
+                                elif isinstance(first, dict):
+                                    metadata["author"] = first.get("name")
+                        # Get datePublished
+                        if not metadata.get("publish_date"):
+                            pub_date = item.get("datePublished")
+                            if pub_date:
+                                metadata["publish_date"] = pub_date
+                        if metadata.get("title") and metadata.get("author"):
+                            break
+                    if metadata and not metadata.get("cms_source"):
+                        metadata["cms_source"] = "json_ld"
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        if metadata:
+            if self._latest_cms_metadata:
+                # Merge, preferring existing values
+                for key, value in metadata.items():
+                    if key not in self._latest_cms_metadata or not self._latest_cms_metadata[key]:
+                        self._latest_cms_metadata[key] = value
+            else:
+                self._latest_cms_metadata = metadata
 
     def _merge_wire_hints(
         self, existing: Dict[str, Any], new_hint: Dict[str, Any]

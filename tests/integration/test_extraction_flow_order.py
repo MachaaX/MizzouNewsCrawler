@@ -262,7 +262,8 @@ class TestExtractionFlowWithRealComponents:
         result = byline_cleaner.clean_byline("AFP", return_json=True)
 
         assert result.get("is_wire_content") is True
-        assert "AFP" in result.get("wire_services", [])
+        # BylineCleaner returns lowercase wire service name from WIRE_SERVICES set
+        assert "afp" in result.get("wire_services", [])
 
     def test_content_type_detector_with_db_session(
         self, populated_wire_patterns, cloud_sql_session
