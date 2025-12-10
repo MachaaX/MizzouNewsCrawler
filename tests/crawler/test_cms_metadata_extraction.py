@@ -143,10 +143,14 @@ class TestJsonLdMetadataExtraction:
 
 
 class TestCmsMetadataPriority:
-    """Test that Nexstar patterns take priority over JSON-LD."""
+    """Test that JSON-LD (standardized) takes priority over CMS-specific patterns."""
 
-    def test_nexstar_takes_priority(self, extractor):
-        """Test that Nexstar data takes priority over JSON-LD."""
+    def test_jsonld_takes_priority_over_cms_specific(self, extractor):
+        """Test that JSON-LD data takes priority over CMS-specific patterns.
+
+        JSON-LD is a W3C/schema.org standard used across all CMSes, so it should
+        be preferred over CMS-specific JavaScript patterns.
+        """
         html = """
         <script>
             window.NXSTdata.content = Object.assign( window.NXSTdata.content, {
@@ -166,7 +170,25 @@ class TestCmsMetadataPriority:
         extractor._extract_cms_metadata_from_html(html)
 
         assert extractor._latest_cms_metadata is not None
-        # Nexstar should take priority
+        # JSON-LD should take priority (standardized format)
+        assert extractor._latest_cms_metadata.get("title") == "JSON-LD Title"
+        assert extractor._latest_cms_metadata.get("author") == "JSON-LD Author"
+        assert extractor._latest_cms_metadata.get("cms_source") == "json_ld"
+
+    def test_cms_specific_used_when_jsonld_missing(self, extractor):
+        """Test that CMS-specific patterns are used when JSON-LD is missing."""
+        html = """
+        <script>
+            window.NXSTdata.content = Object.assign( window.NXSTdata.content, {
+                "title":"Nexstar Title",
+                "authorName":"Nexstar Author"
+            } )
+        </script>
+        """
+        extractor._latest_cms_metadata = None
+        extractor._extract_cms_metadata_from_html(html)
+
+        assert extractor._latest_cms_metadata is not None
         assert extractor._latest_cms_metadata.get("title") == "Nexstar Title"
         assert extractor._latest_cms_metadata.get("author") == "Nexstar Author"
         assert extractor._latest_cms_metadata.get("cms_source") == "nexstar"
@@ -202,3 +224,119 @@ class TestNoMetadataFound:
         extractor._latest_cms_metadata = None
         # Should not raise exception
         extractor._extract_cms_metadata_from_html(html)
+
+
+class TestMetaTagExtraction:
+    """Test extraction from OpenGraph and standard meta tags."""
+
+    def test_extracts_og_title(self, extractor):
+        """Test extraction of og:title from meta tags."""
+        html = """
+        <html>
+        <head>
+            <meta property="og:title" content="OpenGraph Title"/>
+            <meta name="author" content="Meta Author"/>
+        </head>
+        <body></body>
+        </html>
+        """
+        extractor._latest_cms_metadata = None
+        extractor._extract_cms_metadata_from_html(html)
+
+        assert extractor._latest_cms_metadata is not None
+        assert extractor._latest_cms_metadata.get("title") == "OpenGraph Title"
+        assert extractor._latest_cms_metadata.get("author") == "Meta Author"
+        assert extractor._latest_cms_metadata.get("cms_source") == "meta_tags"
+
+    def test_extracts_article_author(self, extractor):
+        """Test extraction of article:author meta tag."""
+        html = """
+        <html>
+        <head>
+            <meta property="article:author" content="Jane Reporter"/>
+            <meta property="article:published_time" content="2025-12-09T12:00:00Z"/>
+        </head>
+        <body></body>
+        </html>
+        """
+        extractor._latest_cms_metadata = None
+        extractor._extract_cms_metadata_from_html(html)
+
+        assert extractor._latest_cms_metadata is not None
+        assert extractor._latest_cms_metadata.get("author") == "Jane Reporter"
+        assert extractor._latest_cms_metadata.get("publish_date") == "2025-12-09T12:00:00Z"
+
+    def test_handles_alternate_meta_order(self, extractor):
+        """Test meta tags with content before property."""
+        html = """
+        <html>
+        <head>
+            <meta content="Alternate Title" property="og:title"/>
+        </head>
+        <body></body>
+        </html>
+        """
+        extractor._latest_cms_metadata = None
+        extractor._extract_cms_metadata_from_html(html)
+
+        assert extractor._latest_cms_metadata is not None
+        assert extractor._latest_cms_metadata.get("title") == "Alternate Title"
+
+
+class TestDataLayerExtraction:
+    """Test extraction from generic dataLayer patterns."""
+
+    def test_extracts_from_datalayer_push(self, extractor):
+        """Test extraction from dataLayer.push with common field names."""
+        html = """
+        <script>
+            dataLayer.push({
+                "articleTitle": "DataLayer Article Title",
+                "articleAuthor": "DataLayer Author"
+            });
+        </script>
+        """
+        extractor._latest_cms_metadata = None
+        extractor._extract_cms_metadata_from_html(html)
+
+        assert extractor._latest_cms_metadata is not None
+        assert extractor._latest_cms_metadata.get("title") == "DataLayer Article Title"
+        assert extractor._latest_cms_metadata.get("author") == "DataLayer Author"
+        assert extractor._latest_cms_metadata.get("cms_source") == "datalayer"
+
+    def test_extracts_alternate_datalayer_fields(self, extractor):
+        """Test extraction from dataLayer with alternate field names."""
+        html = """
+        <script>
+            dataLayer.push({
+                "pageTitle": "Page Title from DataLayer",
+                "byline": "Byline Author"
+            });
+        </script>
+        """
+        extractor._latest_cms_metadata = None
+        extractor._extract_cms_metadata_from_html(html)
+
+        assert extractor._latest_cms_metadata is not None
+        assert extractor._latest_cms_metadata.get("title") == "Page Title from DataLayer"
+        assert extractor._latest_cms_metadata.get("author") == "Byline Author"
+
+    def test_jsonld_preferred_over_datalayer(self, extractor):
+        """Test that JSON-LD is preferred over dataLayer."""
+        html = """
+        <script type="application/ld+json">
+        {"@type": "NewsArticle", "headline": "JSON-LD Headline", "author": "JSON Author"}
+        </script>
+        <script>
+            dataLayer.push({"articleTitle": "DataLayer Title", "articleAuthor": "DL Author"});
+        </script>
+        """
+        extractor._latest_cms_metadata = None
+        extractor._extract_cms_metadata_from_html(html)
+
+        assert extractor._latest_cms_metadata is not None
+        # JSON-LD should win
+        assert extractor._latest_cms_metadata.get("title") == "JSON-LD Headline"
+        assert extractor._latest_cms_metadata.get("author") == "JSON Author"
+        assert extractor._latest_cms_metadata.get("cms_source") == "json_ld"
+

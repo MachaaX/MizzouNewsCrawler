@@ -3019,100 +3019,227 @@ class ContentExtractor:
         self._latest_wire_hints = self._merge_wire_hints(self._latest_wire_hints, hints)
 
     def _extract_cms_metadata_from_html(self, html_text: str) -> None:
-        """Extract content metadata from CMS JavaScript data objects.
+        """Extract content metadata from structured data in HTML.
 
-        Captures title, author, description, and publication date from
-        CMS-specific JavaScript objects like NXSTdata.content (Nexstar),
-        dataLayer (Gray TV), and window.__DATA__ patterns.
+        Captures title, author, description, and publication date from:
+        1. JSON-LD structured data (schema.org - most standardized)
+        2. OpenGraph and standard meta tags
+        3. Generic dataLayer objects (used by many CMSes)
+        4. CMS-specific JavaScript patterns (Nexstar, etc.)
 
         This metadata can fill in gaps when standard extraction fails.
+        The method prioritizes standardized formats over CMS-specific ones.
         """
         metadata: Dict[str, Any] = {}
 
-        # 1. Try Nexstar NXSTdata.content pattern
-        nxst_match = _NXST_CONTENT_RE.search(html_text)
-        if nxst_match:
-            try:
-                # Parse the JSON-like object (may need cleanup)
-                json_str = nxst_match.group(1)
-                # Fix common issues: trailing commas, unquoted keys
-                data = json.loads(json_str)
-                if isinstance(data, dict):
-                    if data.get("title"):
-                        metadata["title"] = data["title"]
-                    if data.get("authorName"):
-                        metadata["author"] = data["authorName"]
-                    if data.get("description"):
-                        metadata["description"] = data["description"]
-                    if data.get("publicationDate"):
-                        metadata["publish_date"] = data["publicationDate"]
-                    if data.get("primaryCategory"):
-                        metadata["category"] = data["primaryCategory"]
-                    metadata["cms_source"] = "nexstar"
-                    logger.debug(
-                        f"Extracted Nexstar CMS metadata: title={data.get('title')}, "
-                        f"author={data.get('authorName')}"
-                    )
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.debug(f"Failed to parse NXSTdata.content: {e}")
-
-        # 2. Try Gray TV dataLayer pattern
-        if not metadata.get("title"):
-            gray_match = _GRAY_DATALAYER_RE.search(html_text)
-            if gray_match:
-                try:
-                    json_str = gray_match.group(1)
-                    data = json.loads(json_str)
-                    if isinstance(data, dict):
-                        if data.get("articleTitle"):
-                            metadata["title"] = data["articleTitle"]
-                        if data.get("articleAuthor"):
-                            metadata["author"] = data["articleAuthor"]
-                        metadata["cms_source"] = "gray_tv"
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-        # 3. Try JSON-LD for title/author if not found yet
-        if not metadata.get("title") or not metadata.get("author"):
-            jsonld_match = _GANNETT_JSONLD_BLOCK_RE.search(html_text)
-            if jsonld_match:
+        # =====================================================================
+        # 1. JSON-LD structured data (FIRST - most standardized, schema.org)
+        # =====================================================================
+        if "application/ld+json" in html_text:
+            for jsonld_match in _GANNETT_JSONLD_BLOCK_RE.finditer(html_text):
                 try:
                     data = json.loads(jsonld_match.group(1))
                     items = data if isinstance(data, list) else [data]
                     for item in items:
                         if not isinstance(item, dict):
                             continue
+                        # Skip non-article types
+                        item_type = item.get("@type", "")
+                        if isinstance(item_type, list):
+                            item_type = item_type[0] if item_type else ""
+                        # Only process article-like types
+                        if item_type and item_type.lower() not in (
+                            "newsarticle", "article", "reportagenewsarticle",
+                            "webpage", "blogposting", "socialmediaposting"
+                        ):
+                            continue
+
                         # Get headline/title
                         if not metadata.get("title"):
                             headline = item.get("headline") or item.get("name")
                             if headline and isinstance(headline, str):
-                                metadata["title"] = headline
-                        # Get author
+                                metadata["title"] = headline.strip()
+
+                        # Get author (various formats)
                         if not metadata.get("author"):
                             author = item.get("author")
-                            if isinstance(author, str):
-                                metadata["author"] = author
-                            elif isinstance(author, dict):
-                                metadata["author"] = author.get("name")
-                            elif isinstance(author, list) and author:
-                                # Take first author
-                                first = author[0]
-                                if isinstance(first, str):
-                                    metadata["author"] = first
-                                elif isinstance(first, dict):
-                                    metadata["author"] = first.get("name")
+                            author_name = self._extract_author_from_jsonld(author)
+                            if author_name:
+                                metadata["author"] = author_name
+
                         # Get datePublished
                         if not metadata.get("publish_date"):
-                            pub_date = item.get("datePublished")
+                            pub_date = (
+                                item.get("datePublished")
+                                or item.get("dateCreated")
+                            )
                             if pub_date:
                                 metadata["publish_date"] = pub_date
+
+                        # Get description
+                        if not metadata.get("description"):
+                            desc = item.get("description")
+                            if desc and isinstance(desc, str):
+                                metadata["description"] = desc.strip()
+
                         if metadata.get("title") and metadata.get("author"):
+                            metadata["cms_source"] = "json_ld"
                             break
-                    if metadata and not metadata.get("cms_source"):
-                        metadata["cms_source"] = "json_ld"
+                    if metadata.get("title") and metadata.get("author"):
+                        break
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        # =====================================================================
+        # 2. OpenGraph and standard meta tags
+        # =====================================================================
+        if not metadata.get("title"):
+            # og:title
+            og_title_match = re.search(
+                r'<meta\s+(?:property|name)=["\']og:title["\']\s+content=["\']([^"\']+)["\']',
+                html_text, re.IGNORECASE
+            )
+            if not og_title_match:
+                og_title_match = re.search(
+                    r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']og:title["\']',
+                    html_text, re.IGNORECASE
+                )
+            if og_title_match:
+                metadata["title"] = og_title_match.group(1).strip()
+                if not metadata.get("cms_source"):
+                    metadata["cms_source"] = "meta_tags"
+
+        if not metadata.get("author"):
+            # article:author or author meta tag
+            author_match = re.search(
+                r'<meta\s+(?:property|name)=["\'](?:article:author|author)["\']\s+content=["\']([^"\']+)["\']',
+                html_text, re.IGNORECASE
+            )
+            if not author_match:
+                author_match = re.search(
+                    r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\'](?:article:author|author)["\']',
+                    html_text, re.IGNORECASE
+                )
+            if author_match:
+                metadata["author"] = author_match.group(1).strip()
+                if not metadata.get("cms_source"):
+                    metadata["cms_source"] = "meta_tags"
+
+        if not metadata.get("publish_date"):
+            # article:published_time
+            pubdate_match = re.search(
+                r'<meta\s+(?:property|name)=["\']article:published_time["\']\s+content=["\']([^"\']+)["\']',
+                html_text, re.IGNORECASE
+            )
+            if not pubdate_match:
+                pubdate_match = re.search(
+                    r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']article:published_time["\']',
+                    html_text, re.IGNORECASE
+                )
+            if pubdate_match:
+                metadata["publish_date"] = pubdate_match.group(1).strip()
+
+        # =====================================================================
+        # 3. Generic dataLayer objects (used by many CMSes for analytics)
+        # =====================================================================
+        if not metadata.get("title") or not metadata.get("author"):
+            # Look for dataLayer.push with article metadata
+            # Common fields: articleTitle, articleAuthor, pageTitle, author
+            datalayer_matches = re.findall(
+                r'dataLayer\.push\s*\(\s*(\{[^}]*\})\s*\)',
+                html_text, re.IGNORECASE | re.DOTALL
+            )
+            for dl_json in datalayer_matches:
+                try:
+                    data = json.loads(dl_json)
+                    if not isinstance(data, dict):
+                        continue
+                    # Try common title field names
+                    if not metadata.get("title"):
+                        title = (
+                            data.get("articleTitle")
+                            or data.get("pageTitle")
+                            or data.get("title")
+                            or data.get("contentTitle")
+                        )
+                        if title and isinstance(title, str):
+                            metadata["title"] = title.strip()
+                            metadata["cms_source"] = "datalayer"
+                    # Try common author field names
+                    if not metadata.get("author"):
+                        author = (
+                            data.get("articleAuthor")
+                            or data.get("author")
+                            or data.get("contentAuthor")
+                            or data.get("byline")
+                        )
+                        if author and isinstance(author, str):
+                            metadata["author"] = author.strip()
+                            metadata["cms_source"] = "datalayer"
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        # =====================================================================
+        # 4. CMS-specific JavaScript patterns (fallback)
+        # =====================================================================
+        # Nexstar NXSTdata.content pattern
+        if not metadata.get("title") or not metadata.get("author"):
+            nxst_match = _NXST_CONTENT_RE.search(html_text)
+            if nxst_match:
+                try:
+                    data = json.loads(nxst_match.group(1))
+                    if isinstance(data, dict):
+                        if not metadata.get("title") and data.get("title"):
+                            metadata["title"] = data["title"].strip()
+                        if not metadata.get("author") and data.get("authorName"):
+                            metadata["author"] = data["authorName"].strip()
+                        if not metadata.get("description") and data.get("description"):
+                            metadata["description"] = data["description"].strip()
+                        if not metadata.get("publish_date") and data.get("publicationDate"):
+                            metadata["publish_date"] = data["publicationDate"]
+                        if not metadata.get("category") and data.get("primaryCategory"):
+                            metadata["category"] = data["primaryCategory"]
+                        if metadata.get("title") or metadata.get("author"):
+                            metadata["cms_source"] = "nexstar"
                 except (json.JSONDecodeError, TypeError):
                     pass
 
+        # Generic window.__DATA__ or window.pageData patterns
+        if not metadata.get("title") or not metadata.get("author"):
+            window_data_match = _WINDOW_DATA_RE.search(html_text)
+            if window_data_match:
+                try:
+                    data = json.loads(window_data_match.group(1))
+                    if isinstance(data, dict):
+                        # Look for article/content nested objects
+                        content = (
+                            data.get("article")
+                            or data.get("content")
+                            or data.get("page")
+                            or data
+                        )
+                        if isinstance(content, dict):
+                            if not metadata.get("title"):
+                                title = (
+                                    content.get("title")
+                                    or content.get("headline")
+                                )
+                                if title and isinstance(title, str):
+                                    metadata["title"] = title.strip()
+                            if not metadata.get("author"):
+                                author = (
+                                    content.get("author")
+                                    or content.get("authorName")
+                                    or content.get("byline")
+                                )
+                                if author and isinstance(author, str):
+                                    metadata["author"] = author.strip()
+                            if metadata.get("title") or metadata.get("author"):
+                                metadata["cms_source"] = "window_data"
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # Store extracted metadata
         if metadata:
             if self._latest_cms_metadata:
                 # Merge, preferring existing values
@@ -3121,6 +3248,31 @@ class ContentExtractor:
                         self._latest_cms_metadata[key] = value
             else:
                 self._latest_cms_metadata = metadata
+
+    def _extract_author_from_jsonld(self, author: Any) -> str | None:
+        """Extract author name from JSON-LD author field.
+
+        Handles various formats:
+        - String: "John Smith"
+        - Object: {"@type": "Person", "name": "John Smith"}
+        - Array: [{"@type": "Person", "name": "John Smith"}, ...]
+        """
+        if isinstance(author, str):
+            return author.strip()
+        elif isinstance(author, dict):
+            name = author.get("name")
+            if name and isinstance(name, str):
+                return name.strip()
+        elif isinstance(author, list) and author:
+            # Take first author
+            first = author[0]
+            if isinstance(first, str):
+                return first.strip()
+            elif isinstance(first, dict):
+                name = first.get("name")
+                if name and isinstance(name, str):
+                    return name.strip()
+        return None
 
     def _merge_wire_hints(
         self, existing: Dict[str, Any], new_hint: Dict[str, Any]
