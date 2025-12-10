@@ -1079,8 +1079,6 @@ def _process_batch(
                     wire_service_info = None
                     article_status = "extracted"
                     byline_result = None
-                    wire_services: list[str] = []
-                    is_wire_content = False
 
                     metadata_value = content.get("metadata") or {}
                     if not isinstance(metadata_value, dict):
@@ -1093,12 +1091,9 @@ def _process_batch(
                     wire_hints = metadata_value.get("wire_hints")
                     if isinstance(wire_hints, dict):
                         hint_services = [
-                            svc
-                            for svc in wire_hints.get("wire_services", [])
-                            if svc
+                            svc for svc in wire_hints.get("wire_services", []) if svc
                         ]
                         if hint_services:
-                            wire_services = list(hint_services)
                             article_status = "wire"
                             wire_service_info = json.dumps(hint_services)
 
@@ -1125,21 +1120,57 @@ def _process_batch(
                                 "detected_at": datetime.utcnow().isoformat(),
                             }
 
-                            # Create byline result for wire content
+                            # Even for wire content, extract any author info so
+                            # we don't lose byline data from the extraction
+                            extracted_authors: list[str] = []
+
+                            # 1. Try to clean raw_author if available
+                            if raw_author:
+                                byline_cleaned = byline_cleaner.clean_byline(
+                                    raw_author,
+                                    return_json=True,
+                                    source_name=source,
+                                    candidate_link_id=str(url_id),
+                                )
+                                extracted_authors = byline_cleaned.get("authors", [])
+
+                            # 2. Also check raw_source_name from wire_hints
+                            # which may contain author info like "John Smith, Reuters"
+                            raw_sources = wire_hints.get("raw_source_name", [])
+                            if isinstance(raw_sources, str):
+                                raw_sources = [raw_sources]
+                            for raw_src in raw_sources:
+                                if raw_src and isinstance(raw_src, str):
+                                    # Try to extract non-wire author from source
+                                    src_cleaned = byline_cleaner.clean_byline(
+                                        raw_src,
+                                        return_json=True,
+                                        source_name=source,
+                                        candidate_link_id=str(url_id),
+                                    )
+                                    for auth in src_cleaned.get("authors", []):
+                                        if auth and auth not in extracted_authors:
+                                            extracted_authors.append(auth)
+
+                            # Create byline result for wire content with any
+                            # extracted authors preserved
                             byline_result = {
-                                "authors": [],
-                                "count": 0,
-                                "primary_author": None,
-                                "has_multiple_authors": False,
+                                "authors": extracted_authors,
+                                "count": len(extracted_authors),
+                                "primary_author": (
+                                    extracted_authors[0] if extracted_authors else None
+                                ),
+                                "has_multiple_authors": len(extracted_authors) > 1,
                                 "wire_services": hint_services,
                                 "is_wire_content": True,
                                 "primary_wire_service": hint_services[0],
                             }
 
                             logger.info(
-                                "Wire detected via %s: wire=%s (skipping byline/content detection)",
+                                "Wire detected via %s: wire=%s, authors=%s (skipping content detection)",
                                 detection_key,
                                 hint_services,
+                                extracted_authors,
                             )
 
                     # =========================================================
@@ -1166,7 +1197,6 @@ def _process_batch(
                         # Handle wire service detection from byline
                         if byline_is_wire and byline_wire_services:
                             article_status = "wire"
-                            wire_services = byline_wire_services
                             wire_service_info = json.dumps(byline_wire_services)
                             byline_result = byline_cleaned
                             logger.info(

@@ -99,4 +99,62 @@ exports/
 *.db-*
 test_*.db
 logs/pre-push/*.log
-=24.0.0
+
+# ============================================
+# Exported data files (should not be committed)
+# ============================================
+
+# CSV exports and scan results
+*.csv
+!sources/publinks.csv
+!data/samples/*.csv
+!reports/manual_enqueue_template.csv
+
+# JSON exports (except config/schema files)
+newly_detected_*.json
+*_results.json
+*_analysis.json
+reports/*_results.json
+reports/*_analysis.json
+reports/cleaning_segments_*.json
+
+# SQL scripts for one-off operations (keep schema scripts)
+delete_wire_*.sql
+bigquery_*.sql
+missouri_*.sql
+!scripts/*.sql
+!bigquery/schema.sql
+
+# Text output files
+*_output*.txt
+*_results*.txt
+copilot_diag*.txt
+backfill_log*.txt
+reports/complete_text_removals_*.txt
+reports/*_dryrun*.csv
+
+# Wire detection scratch files
+wire_*.csv
+afp_wire*.csv
+production_wire*.csv
+paywall_articles.csv
+
+# One-off analysis scripts in root (should be moved to scripts/ or deleted)
+scan_*.py
+check_*.py
+analyze_*.py
+delete_*.py
+update_*.py
+export_*.py
+query_*.py
+full_*.py
+simple_*.py
+find_*.py
+debug_*.py
+test_*.py
+!tests/
+!tests/**
+
+# Temporary test output
+new_detector_*.csv
+new_detector_*.txt

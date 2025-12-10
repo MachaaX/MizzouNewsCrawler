@@ -513,6 +513,10 @@ class ContentExtractor:
         # Reset per-extraction hints
         self._latest_wire_hints: Dict[str, Any] | None = None
 
+        # Cache for wire author patterns from DB (5 min TTL)
+        self._wire_author_patterns_cache: list[tuple[str, str, bool]] = []
+        self._wire_author_patterns_timestamp: float = 0.0
+
         if self.use_mcmetadata and not MCMETADATA_AVAILABLE:
             logger.warning(
                 "mcmetadata requested but package not available; disabling integration"
@@ -3302,7 +3306,9 @@ class ContentExtractor:
         if not wire_services and not detection_methods:
             return None
 
-        detected_by = detection_methods if detection_methods else ["structured_metadata"]
+        detected_by = (
+            detection_methods if detection_methods else ["structured_metadata"]
+        )
         return {
             "detected_by": list(set(detected_by)),
             "raw_source_name": list(set(raw_sources)),
