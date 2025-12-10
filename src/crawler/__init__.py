@@ -138,6 +138,93 @@ _GANNETT_WIRE_PUBLISHERS = {
     "usatoday",
 }
 
+# Generic structured metadata patterns for wire detection
+# These are CMS-agnostic patterns that appear across many publishers
+
+# OpenGraph-style distributor meta tags (e.g., Gray TV stations)
+# <meta property="article:distributor_category" content="wires"/>
+# <meta property="article:distributor_name" content="AP National"/>
+_META_DISTRIBUTOR_CATEGORY_RE = re.compile(
+    r'<meta\s+[^>]*property\s*=\s*["\']article:distributor_category["\'][^>]*'
+    r'content\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_META_DISTRIBUTOR_NAME_RE = re.compile(
+    r'<meta\s+[^>]*property\s*=\s*["\']article:distributor_name["\'][^>]*'
+    r'content\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+# Alternate order: content before property
+_META_DISTRIBUTOR_CATEGORY_ALT_RE = re.compile(
+    r'<meta\s+[^>]*content\s*=\s*["\']([^"\']+)["\'][^>]*'
+    r'property\s*=\s*["\']article:distributor_category["\']',
+    re.IGNORECASE,
+)
+_META_DISTRIBUTOR_NAME_ALT_RE = re.compile(
+    r'<meta\s+[^>]*content\s*=\s*["\']([^"\']+)["\'][^>]*'
+    r'property\s*=\s*["\']article:distributor_name["\']',
+    re.IGNORECASE,
+)
+
+# Canonical URL extraction
+_CANONICAL_LINK_RE = re.compile(
+    r'<link\s+[^>]*rel\s*=\s*["\']canonical["\'][^>]*href\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_CANONICAL_LINK_ALT_RE = re.compile(
+    r'<link\s+[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*rel\s*=\s*["\']canonical["\']',
+    re.IGNORECASE,
+)
+
+# Meta author tag (can contain wire service names with suffix patterns)
+# E.g., <meta name="author" content="Hanna Park, Betsy Klein, CNN"/>
+_META_AUTHOR_RE = re.compile(
+    r'<meta\s+[^>]*name\s*=\s*["\']author["\'][^>]*content\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_META_AUTHOR_ALT_RE = re.compile(
+    r'<meta\s+[^>]*content\s*=\s*["\']([^"\']+)["\'][^>]*name\s*=\s*["\']author["\']',
+    re.IGNORECASE,
+)
+
+# CMS dataLayer syndication fields (TownNews, others)
+# tncms.syndication.source, tncms.syndication.origin, townnews.content.source
+_DATALAYER_SYNDICATION_SOURCE_RE = re.compile(
+    r'["\']?(?:tncms\.syndication\.source|townnews\.content\.source)["\']?\s*'
+    r'[=:]\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_DATALAYER_SYNDICATION_ORIGIN_RE = re.compile(
+    r'["\']?tncms\.syndication\.origin["\']?\s*[=:]\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_DATALAYER_SYNDICATION_CHANNEL_RE = re.compile(
+    r'["\']?tncms\.syndication\.channel["\']?\s*[=:]\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+# Known wire service domains for canonical URL cross-reference
+_WIRE_SERVICE_DOMAINS = {
+    "apnews.com": "The Associated Press",
+    "ap.org": "The Associated Press",
+    "reuters.com": "Reuters",
+    "bloomberg.com": "Bloomberg",
+    "afp.com": "Agence France-Presse",
+    "usatoday.com": "USA Today",
+    "cnn.com": "CNN",
+    "foxnews.com": "Fox News",
+    "nbcnews.com": "NBC News",
+    "abcnews.go.com": "ABC News",
+    "cbsnews.com": "CBS News",
+    "healthday.com": "HealthDay",
+    "upi.com": "UPI",
+    "npr.org": "NPR",
+    "pbs.org": "PBS",
+    "washingtonpost.com": "Washington Post",
+    "nytimes.com": "New York Times",
+    "latimes.com": "Los Angeles Times",
+}
+
 
 def _ensure_attrs_dict(attrs: object) -> dict:
     """Coerce BeautifulSoup `attrs` argument into a dict suitable for
@@ -1736,7 +1823,7 @@ class ContentExtractor:
         )
 
         raw_html_snapshot = mc_result.pop("raw_html", None)
-        self._update_wire_hints_from_html(raw_html_snapshot)
+        self._update_wire_hints_from_html(raw_html_snapshot, url)
 
         text_content = mc_result.get("text_content")
         if isinstance(text_content, bytes):
@@ -2044,7 +2131,7 @@ class ContentExtractor:
         if hasattr(article, "publish_date") and article.publish_date:
             publish_date = article.publish_date.isoformat()
 
-        self._update_wire_hints_from_html(getattr(article, "html", None))
+        self._update_wire_hints_from_html(getattr(article, "html", None), url)
 
         return {
             "url": url,
@@ -2142,7 +2229,7 @@ class ContentExtractor:
                 logger.warning(f"Failed to fetch page for extraction {url}: {e}")
                 return {}
 
-        self._update_wire_hints_from_html(page_html)
+        self._update_wire_hints_from_html(page_html, url)
 
         raw = self.extract_article_data(page_html, url)
 
@@ -2187,7 +2274,7 @@ class ContentExtractor:
             # Extract content after ensuring page is loaded
             html = driver.page_source
 
-            self._update_wire_hints_from_html(html)
+            self._update_wire_hints_from_html(html, url)
 
             # Stop page load immediately after getting HTML to prevent
             # waiting for slow ads/trackers (fixes 147s timeout issue)
@@ -2815,7 +2902,9 @@ class ContentExtractor:
 
         return None
 
-    def _update_wire_hints_from_html(self, html_text: str | bytes | None) -> None:
+    def _update_wire_hints_from_html(
+        self, html_text: str | bytes | None, article_url: str | None = None
+    ) -> None:
         """Update wire detection hints by inspecting raw HTML."""
         if not html_text:
             return
@@ -2829,20 +2918,23 @@ class ContentExtractor:
         else:
             html_str = html_text
 
-        # Try Hearst detection
+        # Try generic structured metadata detection (includes JSON-LD signals)
+        structured_hints = self._detect_structured_metadata_wire_from_html(
+            html_str, article_url
+        )
+
+        # Try Hearst detection (uses window.HRST JavaScript, not JSON-LD)
         hearst_hints = self._detect_hearst_wire_from_html(html_str)
 
-        # Try Gannett/USA Today detection
-        gannett_hints = self._detect_gannett_wire_from_html(html_str)
-
-        # Merge all hints
+        # Merge all hints (structured metadata takes priority)
         hints = None
-        if hearst_hints and gannett_hints:
-            hints = self._merge_wire_hints(hearst_hints, gannett_hints)
-        elif hearst_hints:
-            hints = hearst_hints
-        elif gannett_hints:
-            hints = gannett_hints
+        all_hints = [h for h in [structured_hints, hearst_hints] if h]
+
+        for hint in all_hints:
+            if hints is None:
+                hints = hint
+            else:
+                hints = self._merge_wire_hints(hints, hint)
 
         if not hints:
             return
@@ -2953,118 +3045,410 @@ class ContentExtractor:
             "wire_services": [normalized],
         }
 
-    def _detect_gannett_wire_from_html(self, html_text: str) -> Dict[str, Any] | None:
-        """Detect Gannett/USA Today syndication via JSON-LD syndication signals.
+    def _detect_structured_metadata_wire_from_html(
+        self, html_text: str, article_url: str | None = None
+    ) -> Dict[str, Any] | None:
+        """Detect wire content via generic structured metadata signals.
 
-        Gannett properties (news-leader.com, etc.) embed JSON-LD. We look for
-        signals that indicate the article is **syndicated from USA Today**,
-        not just that the site is part of the USA Today Network:
+        This method looks for CMS-agnostic metadata patterns that indicate
+        syndicated/wire content. These patterns appear across many different
+        CMSes (TownNews, Gray TV, Gannett, and others).
 
-        - isBasedOn pointing to usatoday.com (republished content)
-        - mainEntityOfPage.@id pointing to usatoday.com (canonical is USA Today)
-        - metadata.contentSourceCode = "USAT" (origin is USA Today)
+        Detection methods (in priority order):
+        1. OpenGraph distributor meta tags (article:distributor_category="wires")
+        2. Canonical URL pointing to a known wire service domain
+        3. JSON-LD signals: author, isBasedOn, mainEntityOfPage, contentSourceCode
+        4. dataLayer/CMS syndication fields (tncms.syndication.source, etc.)
 
-        NOTE: publisher.name = "USA TODAY" appears on ALL Gannett sites and is
-        NOT a reliable syndication signal — it just means they're in the network.
+        Returns wire hints dict or None if no signals detected.
         """
-        if "application/ld+json" not in html_text:
-            return None
+        detection_methods: list[str] = []
+        raw_sources: list[str] = []
+        wire_services: list[str] = []
+        evidence: list[str] = []
 
-        raw_source: str | None = None
-        detection_evidence: list[str] = []
-        has_syndication_signal = False
+        # 1. Check OpenGraph distributor meta tags
+        # Example: <meta property="article:distributor_category" content="wires"/>
+        distributor_category = None
+        category_match = _META_DISTRIBUTOR_CATEGORY_RE.search(html_text)
+        if not category_match:
+            category_match = _META_DISTRIBUTOR_CATEGORY_ALT_RE.search(html_text)
+        if category_match:
+            distributor_category = category_match.group(1).strip().lower()
 
-        for block_match in _GANNETT_JSONLD_BLOCK_RE.finditer(html_text):
+        distributor_name = None
+        name_match = _META_DISTRIBUTOR_NAME_RE.search(html_text)
+        if not name_match:
+            name_match = _META_DISTRIBUTOR_NAME_ALT_RE.search(html_text)
+        if name_match:
+            distributor_name = name_match.group(1).strip()
+
+        # If distributor_category indicates wires, this is strong signal
+        if distributor_category in ("wires", "wire", "syndicated", "syndication"):
+            detection_methods.append("og_distributor_category")
+            evidence.append(f"distributor_category={distributor_category}")
+            if distributor_name:
+                raw_sources.append(distributor_name)
+                normalized = self._normalize_wire_service_name(distributor_name)
+                if normalized and normalized not in wire_services:
+                    wire_services.append(normalized)
+                evidence.append(f"distributor_name={distributor_name}")
+
+        # 2. Check canonical URL for cross-domain wire service reference
+        canonical_url = None
+        canonical_match = _CANONICAL_LINK_RE.search(html_text)
+        if not canonical_match:
+            canonical_match = _CANONICAL_LINK_ALT_RE.search(html_text)
+        if canonical_match:
+            canonical_url = canonical_match.group(1).strip()
+
+        if canonical_url:
             try:
-                block_text = block_match.group(1).strip()
-                data = json.loads(block_text)
+                from urllib.parse import urlparse
 
-                # Handle array of JSON-LD objects
-                if isinstance(data, list):
-                    items = data
-                else:
-                    items = [data]
+                canonical_parsed = urlparse(canonical_url)
+                canonical_domain = canonical_parsed.netloc.lower()
+                # Remove www. prefix
+                if canonical_domain.startswith("www."):
+                    canonical_domain = canonical_domain[4:]
 
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
+                # Check if canonical points to a different known wire service domain
+                if article_url:
+                    article_parsed = urlparse(article_url)
+                    article_domain = article_parsed.netloc.lower()
+                    if article_domain.startswith("www."):
+                        article_domain = article_domain[4:]
 
-                    # Check isBasedOn (indicates republished content from another site)
-                    is_based_on = item.get("isBasedOn", "")
-                    if is_based_on and "usatoday.com" in is_based_on.lower():
-                        has_syndication_signal = True
-                        detection_evidence.append(f"isBasedOn={is_based_on[:80]}")
-                        raw_source = "USA Today"
+                    # If canonical is on a different domain that's a wire service
+                    if canonical_domain != article_domain:
+                        # Check both exact match and subdomain match
+                        # e.g., consumer.healthday.com should match healthday.com
+                        wire_name = None
+                        if canonical_domain in _WIRE_SERVICE_DOMAINS:
+                            wire_name = _WIRE_SERVICE_DOMAINS[canonical_domain]
+                        else:
+                            for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                                if canonical_domain.endswith("." + domain):
+                                    wire_name = service
+                                    break
+                        if wire_name:
+                            detection_methods.append("canonical_cross_domain")
+                            raw_sources.append(wire_name)
+                            evidence.append(f"canonical={canonical_url[:100]}")
+                            normalized = self._normalize_wire_service_name(wire_name)
+                            if normalized and normalized not in wire_services:
+                                wire_services.append(normalized)
+            except Exception:
+                pass  # URL parsing failed, continue with other methods
 
-                    # Check mainEntityOfPage.@id (canonical URL is on usatoday.com)
-                    main_entity = item.get("mainEntityOfPage")
-                    if isinstance(main_entity, dict):
-                        entity_id = main_entity.get("@id", "")
-                        if entity_id and "usatoday.com" in entity_id.lower():
-                            has_syndication_signal = True
-                            detection_evidence.append(
-                                f"mainEntityOfPage={entity_id[:80]}"
-                            )
-                            if not raw_source:
-                                raw_source = "USA Today"
+        # 3. Check meta author tag for wire service patterns
+        # E.g., <meta name="author" content="Hanna Park, Betsy Klein, CNN"/>
+        meta_author = None
+        meta_author_match = _META_AUTHOR_RE.search(html_text)
+        if not meta_author_match:
+            meta_author_match = _META_AUTHOR_ALT_RE.search(html_text)
+        if meta_author_match:
+            meta_author = meta_author_match.group(1).strip()
 
-                    # Check embedded metadata.contentSourceCode = "USAT"
-                    metadata_str = item.get("metadata", "")
-                    if isinstance(metadata_str, str) and metadata_str:
-                        try:
-                            meta_obj = json.loads(metadata_str)
-                            source_code = meta_obj.get("contentSourceCode", "")
-                            if source_code == "USAT":
-                                has_syndication_signal = True
-                                detection_evidence.append(
-                                    f"contentSourceCode={source_code}"
+        if meta_author:
+            wire, _ = self._extract_wire_from_author_string(meta_author)
+            if wire and wire not in wire_services:
+                detection_methods.append("meta_author")
+                raw_sources.append(meta_author)
+                wire_services.append(wire)
+                evidence.append(f"meta_author={meta_author[:60]}")
+
+        # 4. Check JSON-LD for wire service signals
+        # This includes: author field, isBasedOn, mainEntityOfPage, contentSourceCode
+        if "application/ld+json" in html_text:
+            for block_match in _GANNETT_JSONLD_BLOCK_RE.finditer(html_text):
+                try:
+                    block_text = block_match.group(1).strip()
+                    data = json.loads(block_text)
+
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+
+                        # Check author field (can be string, dict, or list)
+                        author = item.get("author")
+                        author_names: list[str] = []
+
+                        if isinstance(author, str):
+                            author_names.append(author)
+                        elif isinstance(author, dict):
+                            name = author.get("name")
+                            if isinstance(name, str):
+                                author_names.append(name)
+                        elif isinstance(author, list):
+                            for auth in author:
+                                if isinstance(auth, str):
+                                    author_names.append(auth)
+                                elif isinstance(auth, dict):
+                                    name = auth.get("name")
+                                    if isinstance(name, str):
+                                        author_names.append(name)
+
+                        for author_name in author_names:
+                            # First try exact match
+                            normalized = self._normalize_wire_service_name(author_name)
+                            if normalized and normalized not in wire_services:
+                                detection_methods.append("jsonld_author")
+                                raw_sources.append(author_name)
+                                wire_services.append(normalized)
+                                evidence.append(f"author={author_name[:50]}")
+                            else:
+                                # Try substring match for "Name, Wire Service" patterns
+                                wire, _ = self._extract_wire_from_author_string(
+                                    author_name
                                 )
-                                if not raw_source:
-                                    raw_source = "USA Today"
-                        except (json.JSONDecodeError, TypeError):
-                            pass
+                                if wire and wire not in wire_services:
+                                    detection_methods.append("jsonld_author")
+                                    raw_sources.append(author_name)
+                                    wire_services.append(wire)
+                                    evidence.append(f"author={author_name[:50]}")
 
-            except (json.JSONDecodeError, TypeError):
-                continue
+                        # Check isBasedOn (republished content from another site)
+                        # Used by Gannett/USA Today network sites
+                        is_based_on = item.get("isBasedOn", "")
+                        if is_based_on:
+                            for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                                if domain in is_based_on.lower():
+                                    detection_methods.append("jsonld_isBasedOn")
+                                    evidence.append(f"isBasedOn={is_based_on[:80]}")
+                                    normalized = self._normalize_wire_service_name(
+                                        service
+                                    )
+                                    if normalized and normalized not in wire_services:
+                                        raw_sources.append(service)
+                                        wire_services.append(normalized)
+                                    break
 
-        # Only return if we found actual syndication signals, not just network membership
-        if not has_syndication_signal or not raw_source:
+                        # Check mainEntityOfPage.@id for cross-domain canonical
+                        main_entity = item.get("mainEntityOfPage")
+                        if isinstance(main_entity, dict):
+                            entity_id = main_entity.get("@id", "")
+                            if entity_id:
+                                for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                                    if domain in entity_id.lower():
+                                        detection_methods.append("jsonld_mainEntity")
+                                        evidence.append(
+                                            f"mainEntityOfPage={entity_id[:80]}"
+                                        )
+                                        normalized = self._normalize_wire_service_name(
+                                            service
+                                        )
+                                        if (
+                                            normalized
+                                            and normalized not in wire_services
+                                        ):
+                                            raw_sources.append(service)
+                                            wire_services.append(normalized)
+                                        break
+
+                        # Check Gannett-specific contentSourceCode in embedded metadata
+                        metadata_str = item.get("metadata", "")
+                        if isinstance(metadata_str, str) and metadata_str:
+                            try:
+                                meta_obj = json.loads(metadata_str)
+                                source_code = meta_obj.get("contentSourceCode", "")
+                                if source_code == "USAT":
+                                    detection_methods.append("jsonld_contentSourceCode")
+                                    evidence.append(f"contentSourceCode={source_code}")
+                                    normalized = self._normalize_wire_service_name(
+                                        "USA Today"
+                                    )
+                                    if normalized and normalized not in wire_services:
+                                        raw_sources.append("USA Today")
+                                        wire_services.append(normalized)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        # 4. Check dataLayer/CMS syndication fields
+        # tncms.syndication.source, tncms.syndication.origin, townnews.content.source
+        syndication_source_match = _DATALAYER_SYNDICATION_SOURCE_RE.search(html_text)
+        if syndication_source_match:
+            source_value = syndication_source_match.group(1).strip()
+            # Syndication source often contains the external source name
+            if source_value:
+                detection_methods.append("datalayer_syndication")
+                raw_sources.append(source_value)
+                evidence.append(f"syndication.source={source_value[:50]}")
+                normalized = self._normalize_wire_service_name(source_value)
+                if normalized and normalized not in wire_services:
+                    wire_services.append(normalized)
+
+        syndication_origin_match = _DATALAYER_SYNDICATION_ORIGIN_RE.search(html_text)
+        if syndication_origin_match:
+            origin_value = syndication_origin_match.group(1).strip()
+            if origin_value:
+                evidence.append(f"syndication.origin={origin_value[:50]}")
+                # Origin URLs can also indicate wire services
+                origin_lower = origin_value.lower()
+                for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                    if domain in origin_lower:
+                        detection_methods.append("datalayer_origin")
+                        raw_sources.append(service)
+                        normalized = self._normalize_wire_service_name(service)
+                        if normalized and normalized not in wire_services:
+                            wire_services.append(normalized)
+                        break
+
+        # Return if any signals were detected
+        if not wire_services and not detection_methods:
             return None
 
-        normalized = self._normalize_wire_service_name(raw_source)
-        if not normalized:
-            return None
-
+        detected_by = detection_methods if detection_methods else ["structured_metadata"]
         return {
-            "detected_by": ["gannett_jsonld"],
-            "raw_source_name": [raw_source],
-            "wire_services": [normalized],
-            "evidence": detection_evidence,
+            "detected_by": list(set(detected_by)),
+            "raw_source_name": list(set(raw_sources)),
+            "wire_services": wire_services,
+            "evidence": evidence,
         }
 
+    def _get_wire_author_patterns(self) -> list[tuple[str, str, bool]]:
+        """Load author patterns from wire_services table with caching.
+
+        Returns list of (pattern, service_name, case_sensitive) tuples.
+        """
+        import time
+
+        # Check cache (5 minute TTL)
+        now = time.time()
+        if (
+            hasattr(self, "_wire_author_patterns_cache")
+            and hasattr(self, "_wire_author_patterns_timestamp")
+            and (now - self._wire_author_patterns_timestamp) < 300
+        ):
+            return self._wire_author_patterns_cache
+
+        try:
+            from src.models import WireService
+            from src.models.database import DatabaseManager
+
+            db = DatabaseManager()
+            with db.get_session() as session:
+                patterns = (
+                    session.query(
+                        WireService.pattern,
+                        WireService.service_name,
+                        WireService.case_sensitive,
+                    )
+                    .filter(WireService.active.is_(True))
+                    .filter(WireService.pattern_type == "author")
+                    .order_by(WireService.priority, WireService.id)
+                    .all()
+                )
+                result = [(p[0], p[1], p[2]) for p in patterns]
+                self._wire_author_patterns_cache = result
+                self._wire_author_patterns_timestamp = now
+                return result
+        except Exception:
+            # Fallback to empty list if DB unavailable
+            return []
+
+    def _match_wire_pattern_in_text(
+        self, text: str | None
+    ) -> tuple[str | None, str | None]:
+        """Match text against DB wire service author patterns.
+
+        Uses regex patterns from wire_services table (pattern_type='author').
+
+        Returns (service_name, matched_pattern) or (None, None).
+        """
+        if not text:
+            return None, None
+
+        patterns = self._get_wire_author_patterns()
+        for pattern, service_name, case_sensitive in patterns:
+            try:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                if re.search(pattern, text, flags):
+                    return service_name, pattern
+            except re.error:
+                # Invalid regex pattern, skip it
+                continue
+
+        return None, None
+
     def _normalize_wire_service_name(self, source_name: str | None) -> str | None:
-        """Normalize raw source names to canonical wire services we track."""
+        """Normalize raw source names to canonical wire services.
+
+        First tries exact match against known names, then falls back to
+        DB pattern matching for more complex patterns.
+        """
         if not source_name:
             return None
 
+        # Quick exact match lookup for common names
         normalized_map = {
             "associated press": "The Associated Press",
             "the associated press": "The Associated Press",
             "ap": "The Associated Press",
             "ap news": "The Associated Press",
             "apnews": "The Associated Press",
+            "ap national": "The Associated Press",
+            "ap regional": "The Associated Press",
             "reuters": "Reuters",
             "bloomberg": "Bloomberg",
+            "bloomberg news": "Bloomberg",
             "agence france-presse": "Agence France-Presse",
             "agence france presse": "Agence France-Presse",
             "afp": "Agence France-Presse",
             "tribune news service": "Tribune News Service",
+            "tribune content agency": "Tribune News Service",
             "usa today": "USA Today",
             "usatoday": "USA Today",
+            "cnn": "CNN",
+            "cnn wire": "CNN",
+            "fox news": "Fox News",
+            "nbc news": "NBC News",
+            "abc news": "ABC News",
+            "cbs news": "CBS News",
+            "npr": "NPR",
+            "pbs": "PBS",
+            "upi": "UPI",
+            "united press international": "UPI",
+            "healthday": "HealthDay",
+            "healthday news": "HealthDay",
+            "washington post": "Washington Post",
+            "the washington post": "Washington Post",
+            "new york times": "New York Times",
+            "the new york times": "New York Times",
+            "los angeles times": "Los Angeles Times",
+            "la times": "Los Angeles Times",
+            "gray news": "Gray News",
+            "states newsroom": "States Newsroom",
+            "stacker": "Stacker",
+            "talker news": "Talker News",
         }
 
         lookup_key = source_name.strip().lower()
-        return normalized_map.get(lookup_key)
+        exact_match = normalized_map.get(lookup_key)
+        if exact_match:
+            return exact_match
+
+        # Fall back to DB pattern matching
+        service_name, _ = self._match_wire_pattern_in_text(source_name)
+        return service_name
+
+    def _extract_wire_from_author_string(
+        self, author_str: str | None
+    ) -> tuple[str | None, str | None]:
+        """Extract wire service from author string using DB patterns.
+
+        Handles patterns like:
+        - "TERESA CEROJANO, Associated Press"
+        - "Hanna Park, Betsy Klein, CNN"
+        - "John Doe | Reuters"
+
+        Returns (service_name, matched_pattern) or (None, None).
+        """
+        return self._match_wire_pattern_in_text(author_str)
 
     def _record_publish_date_details(
         self, source: str, details: Optional[Dict[str, Any]] = None
