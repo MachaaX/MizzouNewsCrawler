@@ -138,6 +138,116 @@ _GANNETT_WIRE_PUBLISHERS = {
     "usatoday",
 }
 
+# Generic structured metadata patterns for wire detection
+# These are CMS-agnostic patterns that appear across many publishers
+
+# OpenGraph-style distributor meta tags (e.g., Gray TV stations)
+# <meta property="article:distributor_category" content="wires"/>
+# <meta property="article:distributor_name" content="AP National"/>
+_META_DISTRIBUTOR_CATEGORY_RE = re.compile(
+    r'<meta\s+[^>]*property\s*=\s*["\']article:distributor_category["\'][^>]*'
+    r'content\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_META_DISTRIBUTOR_NAME_RE = re.compile(
+    r'<meta\s+[^>]*property\s*=\s*["\']article:distributor_name["\'][^>]*'
+    r'content\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+# Alternate order: content before property
+_META_DISTRIBUTOR_CATEGORY_ALT_RE = re.compile(
+    r'<meta\s+[^>]*content\s*=\s*["\']([^"\']+)["\'][^>]*'
+    r'property\s*=\s*["\']article:distributor_category["\']',
+    re.IGNORECASE,
+)
+_META_DISTRIBUTOR_NAME_ALT_RE = re.compile(
+    r'<meta\s+[^>]*content\s*=\s*["\']([^"\']+)["\'][^>]*'
+    r'property\s*=\s*["\']article:distributor_name["\']',
+    re.IGNORECASE,
+)
+
+# Canonical URL extraction
+_CANONICAL_LINK_RE = re.compile(
+    r'<link\s+[^>]*rel\s*=\s*["\']canonical["\'][^>]*href\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_CANONICAL_LINK_ALT_RE = re.compile(
+    r'<link\s+[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*rel\s*=\s*["\']canonical["\']',
+    re.IGNORECASE,
+)
+
+# Meta author tag (can contain wire service names with suffix patterns)
+# E.g., <meta name="author" content="Hanna Park, Betsy Klein, CNN"/>
+_META_AUTHOR_RE = re.compile(
+    r'<meta\s+[^>]*name\s*=\s*["\']author["\'][^>]*content\s*=\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_META_AUTHOR_ALT_RE = re.compile(
+    r'<meta\s+[^>]*content\s*=\s*["\']([^"\']+)["\'][^>]*name\s*=\s*["\']author["\']',
+    re.IGNORECASE,
+)
+
+# CMS dataLayer syndication fields (TownNews, others)
+# tncms.syndication.source, tncms.syndication.origin, townnews.content.source
+_DATALAYER_SYNDICATION_SOURCE_RE = re.compile(
+    r'["\']?(?:tncms\.syndication\.source|townnews\.content\.source)["\']?\s*'
+    r'[=:]\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_DATALAYER_SYNDICATION_ORIGIN_RE = re.compile(
+    r'["\']?tncms\.syndication\.origin["\']?\s*[=:]\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_DATALAYER_SYNDICATION_CHANNEL_RE = re.compile(
+    r'["\']?tncms\.syndication\.channel["\']?\s*[=:]\s*["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+# Known wire service domains for canonical URL cross-reference
+_WIRE_SERVICE_DOMAINS = {
+    "apnews.com": "The Associated Press",
+    "ap.org": "The Associated Press",
+    "reuters.com": "Reuters",
+    "bloomberg.com": "Bloomberg",
+    "afp.com": "Agence France-Presse",
+    "usatoday.com": "USA Today",
+    "cnn.com": "CNN",
+    "foxnews.com": "Fox News",
+    "nbcnews.com": "NBC News",
+    "abcnews.go.com": "ABC News",
+    "cbsnews.com": "CBS News",
+    "healthday.com": "HealthDay",
+    "upi.com": "UPI",
+    "npr.org": "NPR",
+    "pbs.org": "PBS",
+    "washingtonpost.com": "Washington Post",
+    "nytimes.com": "New York Times",
+    "latimes.com": "Los Angeles Times",
+}
+
+# CMS-specific JavaScript data object patterns for content metadata extraction
+# These capture title, author, and other fields from CMS JavaScript objects
+
+# Nexstar Media (NXSTdata.content) - used by many TV stations
+# window.NXSTdata.content = Object.assign(window.NXSTdata.content, {...})
+_NXST_CONTENT_RE = re.compile(
+    r"window\.NXSTdata\.content\s*=\s*Object\.assign\s*\(\s*"
+    r"window\.NXSTdata\.content\s*,\s*(\{[^}]+\})\s*\)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Generic window.__DATA__ or window.pageData patterns
+_WINDOW_DATA_RE = re.compile(
+    r"window\.__(?:INITIAL_)?DATA__\s*=\s*(\{.*?\});?\s*(?:</script>|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Gray Television dataLayer.push pattern
+_GRAY_DATALAYER_RE = re.compile(
+    r'dataLayer\.push\s*\(\s*(\{[^}]*"articleTitle"[^}]*\})\s*\)',
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 def _ensure_attrs_dict(attrs: object) -> dict:
     """Coerce BeautifulSoup `attrs` argument into a dict suitable for
@@ -425,6 +535,13 @@ class ContentExtractor:
 
         # Reset per-extraction hints
         self._latest_wire_hints: Dict[str, Any] | None = None
+
+        # CMS metadata extracted from JavaScript data objects (title, author, etc.)
+        self._latest_cms_metadata: Dict[str, Any] | None = None
+
+        # Cache for wire author patterns from DB (5 min TTL)
+        self._wire_author_patterns_cache: list[tuple[str, str, bool]] = []
+        self._wire_author_patterns_timestamp: float = 0.0
 
         if self.use_mcmetadata and not MCMETADATA_AVAILABLE:
             logger.warning(
@@ -1214,6 +1331,7 @@ class ContentExtractor:
         # Reset publish-date detail tracking for this article
         self._publish_date_details = None
         self._latest_wire_hints = None
+        self._latest_cms_metadata = None
 
         # Initialize result structure
         result: Dict[str, Any] = {
@@ -1469,6 +1587,50 @@ class ContentExtractor:
             else:
                 metadata["wire_hints"] = deepcopy(self._latest_wire_hints)
 
+        # Apply CMS metadata fallback for missing title/author
+        if self._latest_cms_metadata:
+            cms_meta = self._latest_cms_metadata
+            metadata = result.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+                result["metadata"] = metadata
+
+            # Fill in missing title from CMS data
+            if not result.get("title") and cms_meta.get("title"):
+                result["title"] = cms_meta["title"]
+                result["extraction_methods"][
+                    "title"
+                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+                logger.info(
+                    "Title filled from CMS metadata (%s): %s",
+                    cms_meta.get("cms_source"),
+                    cms_meta["title"][:50] if cms_meta["title"] else None,
+                )
+
+            # Fill in missing author from CMS data
+            if not result.get("author") and cms_meta.get("author"):
+                result["author"] = cms_meta["author"]
+                result["extraction_methods"][
+                    "author"
+                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+                logger.info(
+                    "Author filled from CMS metadata (%s): %s",
+                    cms_meta.get("cms_source"),
+                    cms_meta["author"],
+                )
+
+            # Fill in missing publish_date from CMS data
+            if not result.get("publish_date") and cms_meta.get("publish_date"):
+                result["publish_date"] = cms_meta["publish_date"]
+                result["extraction_methods"][
+                    "publish_date"
+                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
+
+            # Store CMS metadata source in result metadata for debugging
+            metadata["cms_metadata_source"] = cms_meta.get("cms_source")
+            if cms_meta.get("category"):
+                metadata["cms_category"] = cms_meta["category"]
+
         # Apply URL-based publish date fallback when all methods fail
         if not result.get("publish_date"):
             url_fallback = self._extract_publish_date_from_url(url)
@@ -1516,6 +1678,7 @@ class ContentExtractor:
 
         # Prevent hints from leaking across articles
         self._latest_wire_hints = None
+        self._latest_cms_metadata = None
 
         return result_copy
 
@@ -1736,7 +1899,7 @@ class ContentExtractor:
         )
 
         raw_html_snapshot = mc_result.pop("raw_html", None)
-        self._update_wire_hints_from_html(raw_html_snapshot)
+        self._update_wire_hints_from_html(raw_html_snapshot, url)
 
         text_content = mc_result.get("text_content")
         if isinstance(text_content, bytes):
@@ -2044,7 +2207,7 @@ class ContentExtractor:
         if hasattr(article, "publish_date") and article.publish_date:
             publish_date = article.publish_date.isoformat()
 
-        self._update_wire_hints_from_html(getattr(article, "html", None))
+        self._update_wire_hints_from_html(getattr(article, "html", None), url)
 
         return {
             "url": url,
@@ -2142,7 +2305,7 @@ class ContentExtractor:
                 logger.warning(f"Failed to fetch page for extraction {url}: {e}")
                 return {}
 
-        self._update_wire_hints_from_html(page_html)
+        self._update_wire_hints_from_html(page_html, url)
 
         raw = self.extract_article_data(page_html, url)
 
@@ -2187,7 +2350,7 @@ class ContentExtractor:
             # Extract content after ensuring page is loaded
             html = driver.page_source
 
-            self._update_wire_hints_from_html(html)
+            self._update_wire_hints_from_html(html, url)
 
             # Stop page load immediately after getting HTML to prevent
             # waiting for slow ads/trackers (fixes 147s timeout issue)
@@ -2815,7 +2978,9 @@ class ContentExtractor:
 
         return None
 
-    def _update_wire_hints_from_html(self, html_text: str | bytes | None) -> None:
+    def _update_wire_hints_from_html(
+        self, html_text: str | bytes | None, article_url: str | None = None
+    ) -> None:
         """Update wire detection hints by inspecting raw HTML."""
         if not html_text:
             return
@@ -2829,20 +2994,26 @@ class ContentExtractor:
         else:
             html_str = html_text
 
-        # Try Hearst detection
+        # Extract CMS content metadata (title, author) from JavaScript objects
+        self._extract_cms_metadata_from_html(html_str)
+
+        # Try generic structured metadata detection (includes JSON-LD signals)
+        structured_hints = self._detect_structured_metadata_wire_from_html(
+            html_str, article_url
+        )
+
+        # Try Hearst detection (uses window.HRST JavaScript, not JSON-LD)
         hearst_hints = self._detect_hearst_wire_from_html(html_str)
 
-        # Try Gannett/USA Today detection
-        gannett_hints = self._detect_gannett_wire_from_html(html_str)
-
-        # Merge all hints
+        # Merge all hints (structured metadata takes priority)
         hints = None
-        if hearst_hints and gannett_hints:
-            hints = self._merge_wire_hints(hearst_hints, gannett_hints)
-        elif hearst_hints:
-            hints = hearst_hints
-        elif gannett_hints:
-            hints = gannett_hints
+        all_hints = [h for h in [structured_hints, hearst_hints] if h]
+
+        for hint in all_hints:
+            if hints is None:
+                hints = hint
+            else:
+                hints = self._merge_wire_hints(hints, hint)
 
         if not hints:
             return
@@ -2852,6 +3023,274 @@ class ContentExtractor:
             return
 
         self._latest_wire_hints = self._merge_wire_hints(self._latest_wire_hints, hints)
+
+    def _extract_cms_metadata_from_html(self, html_text: str) -> None:
+        """Extract content metadata from structured data in HTML.
+
+        Captures title, author, description, and publication date from:
+        1. JSON-LD structured data (schema.org - most standardized)
+        2. OpenGraph and standard meta tags
+        3. Generic dataLayer objects (used by many CMSes)
+        4. CMS-specific JavaScript patterns (Nexstar, etc.)
+
+        This metadata can fill in gaps when standard extraction fails.
+        The method prioritizes standardized formats over CMS-specific ones.
+        """
+        metadata: Dict[str, Any] = {}
+
+        # =====================================================================
+        # 1. JSON-LD structured data (FIRST - most standardized, schema.org)
+        # =====================================================================
+        if "application/ld+json" in html_text:
+            for jsonld_match in _GANNETT_JSONLD_BLOCK_RE.finditer(html_text):
+                try:
+                    data = json.loads(jsonld_match.group(1))
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        # Skip non-article types
+                        item_type = item.get("@type", "")
+                        if isinstance(item_type, list):
+                            item_type = item_type[0] if item_type else ""
+                        # Only process article-like types
+                        if item_type and item_type.lower() not in (
+                            "newsarticle",
+                            "article",
+                            "reportagenewsarticle",
+                            "webpage",
+                            "blogposting",
+                            "socialmediaposting",
+                        ):
+                            continue
+
+                        # Get headline/title
+                        if not metadata.get("title"):
+                            headline = item.get("headline") or item.get("name")
+                            if headline and isinstance(headline, str):
+                                metadata["title"] = headline.strip()
+
+                        # Get author (various formats)
+                        if not metadata.get("author"):
+                            author = item.get("author")
+                            author_name = self._extract_author_from_jsonld(author)
+                            if author_name:
+                                metadata["author"] = author_name
+
+                        # Get datePublished
+                        if not metadata.get("publish_date"):
+                            pub_date = item.get("datePublished") or item.get(
+                                "dateCreated"
+                            )
+                            if pub_date:
+                                metadata["publish_date"] = pub_date
+
+                        # Get description
+                        if not metadata.get("description"):
+                            desc = item.get("description")
+                            if desc and isinstance(desc, str):
+                                metadata["description"] = desc.strip()
+
+                        if metadata.get("title") and metadata.get("author"):
+                            metadata["cms_source"] = "json_ld"
+                            break
+                    if metadata.get("title") and metadata.get("author"):
+                        break
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        # =====================================================================
+        # 2. OpenGraph and standard meta tags
+        # =====================================================================
+        if not metadata.get("title"):
+            # og:title
+            og_title_match = re.search(
+                r'<meta\s+(?:property|name)=["\']og:title["\']\s+content=["\']([^"\']+)["\']',
+                html_text,
+                re.IGNORECASE,
+            )
+            if not og_title_match:
+                og_title_match = re.search(
+                    r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']og:title["\']',
+                    html_text,
+                    re.IGNORECASE,
+                )
+            if og_title_match:
+                metadata["title"] = og_title_match.group(1).strip()
+                if not metadata.get("cms_source"):
+                    metadata["cms_source"] = "meta_tags"
+
+        if not metadata.get("author"):
+            # article:author or author meta tag
+            author_match = re.search(
+                r'<meta\s+(?:property|name)=["\'](?:article:author|author)["\']\s+content=["\']([^"\']+)["\']',
+                html_text,
+                re.IGNORECASE,
+            )
+            if not author_match:
+                author_match = re.search(
+                    r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\'](?:article:author|author)["\']',
+                    html_text,
+                    re.IGNORECASE,
+                )
+            if author_match:
+                metadata["author"] = author_match.group(1).strip()
+                if not metadata.get("cms_source"):
+                    metadata["cms_source"] = "meta_tags"
+
+        if not metadata.get("publish_date"):
+            # article:published_time
+            pubdate_match = re.search(
+                r'<meta\s+(?:property|name)=["\']article:published_time["\']\s+content=["\']([^"\']+)["\']',
+                html_text,
+                re.IGNORECASE,
+            )
+            if not pubdate_match:
+                pubdate_match = re.search(
+                    r'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']article:published_time["\']',
+                    html_text,
+                    re.IGNORECASE,
+                )
+            if pubdate_match:
+                metadata["publish_date"] = pubdate_match.group(1).strip()
+
+        # =====================================================================
+        # 3. Generic dataLayer objects (used by many CMSes for analytics)
+        # =====================================================================
+        if not metadata.get("title") or not metadata.get("author"):
+            # Look for dataLayer.push with article metadata
+            # Common fields: articleTitle, articleAuthor, pageTitle, author
+            datalayer_matches = re.findall(
+                r"dataLayer\.push\s*\(\s*(\{[^}]*\})\s*\)",
+                html_text,
+                re.IGNORECASE | re.DOTALL,
+            )
+            for dl_json in datalayer_matches:
+                try:
+                    data = json.loads(dl_json)
+                    if not isinstance(data, dict):
+                        continue
+                    # Try common title field names
+                    if not metadata.get("title"):
+                        title = (
+                            data.get("articleTitle")
+                            or data.get("pageTitle")
+                            or data.get("title")
+                            or data.get("contentTitle")
+                        )
+                        if title and isinstance(title, str):
+                            metadata["title"] = title.strip()
+                            metadata["cms_source"] = "datalayer"
+                    # Try common author field names
+                    if not metadata.get("author"):
+                        author = (
+                            data.get("articleAuthor")
+                            or data.get("author")
+                            or data.get("contentAuthor")
+                            or data.get("byline")
+                        )
+                        if author and isinstance(author, str):
+                            metadata["author"] = author.strip()
+                            metadata["cms_source"] = "datalayer"
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        # =====================================================================
+        # 4. CMS-specific JavaScript patterns (fallback)
+        # =====================================================================
+        # Nexstar NXSTdata.content pattern
+        if not metadata.get("title") or not metadata.get("author"):
+            nxst_match = _NXST_CONTENT_RE.search(html_text)
+            if nxst_match:
+                try:
+                    data = json.loads(nxst_match.group(1))
+                    if isinstance(data, dict):
+                        if not metadata.get("title") and data.get("title"):
+                            metadata["title"] = data["title"].strip()
+                        if not metadata.get("author") and data.get("authorName"):
+                            metadata["author"] = data["authorName"].strip()
+                        if not metadata.get("description") and data.get("description"):
+                            metadata["description"] = data["description"].strip()
+                        if not metadata.get("publish_date") and data.get(
+                            "publicationDate"
+                        ):
+                            metadata["publish_date"] = data["publicationDate"]
+                        if not metadata.get("category") and data.get("primaryCategory"):
+                            metadata["category"] = data["primaryCategory"]
+                        if metadata.get("title") or metadata.get("author"):
+                            metadata["cms_source"] = "nexstar"
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # Generic window.__DATA__ or window.pageData patterns
+        if not metadata.get("title") or not metadata.get("author"):
+            window_data_match = _WINDOW_DATA_RE.search(html_text)
+            if window_data_match:
+                try:
+                    data = json.loads(window_data_match.group(1))
+                    if isinstance(data, dict):
+                        # Look for article/content nested objects
+                        content = (
+                            data.get("article")
+                            or data.get("content")
+                            or data.get("page")
+                            or data
+                        )
+                        if isinstance(content, dict):
+                            if not metadata.get("title"):
+                                title = content.get("title") or content.get("headline")
+                                if title and isinstance(title, str):
+                                    metadata["title"] = title.strip()
+                            if not metadata.get("author"):
+                                author = (
+                                    content.get("author")
+                                    or content.get("authorName")
+                                    or content.get("byline")
+                                )
+                                if author and isinstance(author, str):
+                                    metadata["author"] = author.strip()
+                            if metadata.get("title") or metadata.get("author"):
+                                metadata["cms_source"] = "window_data"
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # Store extracted metadata
+        if metadata:
+            if self._latest_cms_metadata:
+                # Merge, preferring existing values
+                for key, value in metadata.items():
+                    if (
+                        key not in self._latest_cms_metadata
+                        or not self._latest_cms_metadata[key]
+                    ):
+                        self._latest_cms_metadata[key] = value
+            else:
+                self._latest_cms_metadata = metadata
+
+    def _extract_author_from_jsonld(self, author: Any) -> str | None:
+        """Extract author name from JSON-LD author field.
+
+        Handles various formats:
+        - String: "John Smith"
+        - Object: {"@type": "Person", "name": "John Smith"}
+        - Array: [{"@type": "Person", "name": "John Smith"}, ...]
+        """
+        if isinstance(author, str):
+            return author.strip()
+        elif isinstance(author, dict):
+            name = author.get("name")
+            if name and isinstance(name, str):
+                return name.strip()
+        elif isinstance(author, list) and author:
+            # Take first author
+            first = author[0]
+            if isinstance(first, str):
+                return first.strip()
+            elif isinstance(first, dict):
+                name = first.get("name")
+                if name and isinstance(name, str):
+                    return name.strip()
+        return None
 
     def _merge_wire_hints(
         self, existing: Dict[str, Any], new_hint: Dict[str, Any]
@@ -2953,118 +3392,412 @@ class ContentExtractor:
             "wire_services": [normalized],
         }
 
-    def _detect_gannett_wire_from_html(self, html_text: str) -> Dict[str, Any] | None:
-        """Detect Gannett/USA Today syndication via JSON-LD syndication signals.
+    def _detect_structured_metadata_wire_from_html(
+        self, html_text: str, article_url: str | None = None
+    ) -> Dict[str, Any] | None:
+        """Detect wire content via generic structured metadata signals.
 
-        Gannett properties (news-leader.com, etc.) embed JSON-LD. We look for
-        signals that indicate the article is **syndicated from USA Today**,
-        not just that the site is part of the USA Today Network:
+        This method looks for CMS-agnostic metadata patterns that indicate
+        syndicated/wire content. These patterns appear across many different
+        CMSes (TownNews, Gray TV, Gannett, and others).
 
-        - isBasedOn pointing to usatoday.com (republished content)
-        - mainEntityOfPage.@id pointing to usatoday.com (canonical is USA Today)
-        - metadata.contentSourceCode = "USAT" (origin is USA Today)
+        Detection methods (in priority order):
+        1. OpenGraph distributor meta tags (article:distributor_category="wires")
+        2. Canonical URL pointing to a known wire service domain
+        3. JSON-LD signals: author, isBasedOn, mainEntityOfPage, contentSourceCode
+        4. dataLayer/CMS syndication fields (tncms.syndication.source, etc.)
 
-        NOTE: publisher.name = "USA TODAY" appears on ALL Gannett sites and is
-        NOT a reliable syndication signal — it just means they're in the network.
+        Returns wire hints dict or None if no signals detected.
         """
-        if "application/ld+json" not in html_text:
-            return None
+        detection_methods: list[str] = []
+        raw_sources: list[str] = []
+        wire_services: list[str] = []
+        evidence: list[str] = []
 
-        raw_source: str | None = None
-        detection_evidence: list[str] = []
-        has_syndication_signal = False
+        # 1. Check OpenGraph distributor meta tags
+        # Example: <meta property="article:distributor_category" content="wires"/>
+        distributor_category = None
+        category_match = _META_DISTRIBUTOR_CATEGORY_RE.search(html_text)
+        if not category_match:
+            category_match = _META_DISTRIBUTOR_CATEGORY_ALT_RE.search(html_text)
+        if category_match:
+            distributor_category = category_match.group(1).strip().lower()
 
-        for block_match in _GANNETT_JSONLD_BLOCK_RE.finditer(html_text):
+        distributor_name = None
+        name_match = _META_DISTRIBUTOR_NAME_RE.search(html_text)
+        if not name_match:
+            name_match = _META_DISTRIBUTOR_NAME_ALT_RE.search(html_text)
+        if name_match:
+            distributor_name = name_match.group(1).strip()
+
+        # If distributor_category indicates wires, this is strong signal
+        if distributor_category in ("wires", "wire", "syndicated", "syndication"):
+            detection_methods.append("og_distributor_category")
+            evidence.append(f"distributor_category={distributor_category}")
+            if distributor_name:
+                raw_sources.append(distributor_name)
+                normalized = self._normalize_wire_service_name(distributor_name)
+                if normalized and normalized not in wire_services:
+                    wire_services.append(normalized)
+                evidence.append(f"distributor_name={distributor_name}")
+
+        # 2. Check canonical URL for cross-domain wire service reference
+        canonical_url = None
+        canonical_match = _CANONICAL_LINK_RE.search(html_text)
+        if not canonical_match:
+            canonical_match = _CANONICAL_LINK_ALT_RE.search(html_text)
+        if canonical_match:
+            canonical_url = canonical_match.group(1).strip()
+
+        if canonical_url:
             try:
-                block_text = block_match.group(1).strip()
-                data = json.loads(block_text)
+                from urllib.parse import urlparse
 
-                # Handle array of JSON-LD objects
-                if isinstance(data, list):
-                    items = data
-                else:
-                    items = [data]
+                canonical_parsed = urlparse(canonical_url)
+                canonical_domain = canonical_parsed.netloc.lower()
+                # Remove www. prefix
+                if canonical_domain.startswith("www."):
+                    canonical_domain = canonical_domain[4:]
 
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
+                # Check if canonical points to a different known wire service domain
+                if article_url:
+                    article_parsed = urlparse(article_url)
+                    article_domain = article_parsed.netloc.lower()
+                    if article_domain.startswith("www."):
+                        article_domain = article_domain[4:]
 
-                    # Check isBasedOn (indicates republished content from another site)
-                    is_based_on = item.get("isBasedOn", "")
-                    if is_based_on and "usatoday.com" in is_based_on.lower():
-                        has_syndication_signal = True
-                        detection_evidence.append(f"isBasedOn={is_based_on[:80]}")
-                        raw_source = "USA Today"
+                    # If canonical is on a different domain that's a wire service
+                    if canonical_domain != article_domain:
+                        # Check both exact match and subdomain match
+                        # e.g., consumer.healthday.com should match healthday.com
+                        wire_name = None
+                        if canonical_domain in _WIRE_SERVICE_DOMAINS:
+                            wire_name = _WIRE_SERVICE_DOMAINS[canonical_domain]
+                        else:
+                            for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                                if canonical_domain.endswith("." + domain):
+                                    wire_name = service
+                                    break
+                        if wire_name:
+                            detection_methods.append("canonical_cross_domain")
+                            raw_sources.append(wire_name)
+                            evidence.append(f"canonical={canonical_url[:100]}")
+                            normalized = self._normalize_wire_service_name(wire_name)
+                            if normalized and normalized not in wire_services:
+                                wire_services.append(normalized)
+            except Exception:
+                pass  # URL parsing failed, continue with other methods
 
-                    # Check mainEntityOfPage.@id (canonical URL is on usatoday.com)
-                    main_entity = item.get("mainEntityOfPage")
-                    if isinstance(main_entity, dict):
-                        entity_id = main_entity.get("@id", "")
-                        if entity_id and "usatoday.com" in entity_id.lower():
-                            has_syndication_signal = True
-                            detection_evidence.append(
-                                f"mainEntityOfPage={entity_id[:80]}"
-                            )
-                            if not raw_source:
-                                raw_source = "USA Today"
+        # 3. Check meta author tag for wire service patterns
+        # E.g., <meta name="author" content="Hanna Park, Betsy Klein, CNN"/>
+        meta_author = None
+        meta_author_match = _META_AUTHOR_RE.search(html_text)
+        if not meta_author_match:
+            meta_author_match = _META_AUTHOR_ALT_RE.search(html_text)
+        if meta_author_match:
+            meta_author = meta_author_match.group(1).strip()
 
-                    # Check embedded metadata.contentSourceCode = "USAT"
-                    metadata_str = item.get("metadata", "")
-                    if isinstance(metadata_str, str) and metadata_str:
-                        try:
-                            meta_obj = json.loads(metadata_str)
-                            source_code = meta_obj.get("contentSourceCode", "")
-                            if source_code == "USAT":
-                                has_syndication_signal = True
-                                detection_evidence.append(
-                                    f"contentSourceCode={source_code}"
+        if meta_author:
+            wire, _ = self._extract_wire_from_author_string(meta_author)
+            if wire and wire not in wire_services:
+                detection_methods.append("meta_author")
+                raw_sources.append(meta_author)
+                wire_services.append(wire)
+                evidence.append(f"meta_author={meta_author[:60]}")
+
+        # 4. Check JSON-LD for wire service signals
+        # This includes: author field, isBasedOn, mainEntityOfPage, contentSourceCode
+        if "application/ld+json" in html_text:
+            for block_match in _GANNETT_JSONLD_BLOCK_RE.finditer(html_text):
+                try:
+                    block_text = block_match.group(1).strip()
+                    data = json.loads(block_text)
+
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+
+                        # Check author field (can be string, dict, or list)
+                        author = item.get("author")
+                        author_names: list[str] = []
+
+                        if isinstance(author, str):
+                            author_names.append(author)
+                        elif isinstance(author, dict):
+                            name = author.get("name")
+                            if isinstance(name, str):
+                                author_names.append(name)
+                        elif isinstance(author, list):
+                            for auth in author:
+                                if isinstance(auth, str):
+                                    author_names.append(auth)
+                                elif isinstance(auth, dict):
+                                    name = auth.get("name")
+                                    if isinstance(name, str):
+                                        author_names.append(name)
+
+                        for author_name in author_names:
+                            # First try exact match
+                            normalized = self._normalize_wire_service_name(author_name)
+                            if normalized and normalized not in wire_services:
+                                detection_methods.append("jsonld_author")
+                                raw_sources.append(author_name)
+                                wire_services.append(normalized)
+                                evidence.append(f"author={author_name[:50]}")
+                            else:
+                                # Try substring match for "Name, Wire Service" patterns
+                                wire, _ = self._extract_wire_from_author_string(
+                                    author_name
                                 )
-                                if not raw_source:
-                                    raw_source = "USA Today"
-                        except (json.JSONDecodeError, TypeError):
-                            pass
+                                if wire and wire not in wire_services:
+                                    detection_methods.append("jsonld_author")
+                                    raw_sources.append(author_name)
+                                    wire_services.append(wire)
+                                    evidence.append(f"author={author_name[:50]}")
 
-            except (json.JSONDecodeError, TypeError):
-                continue
+                        # Check isBasedOn (republished content from another site)
+                        # Used by Gannett/USA Today network sites
+                        is_based_on = item.get("isBasedOn", "")
+                        if is_based_on:
+                            for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                                if domain in is_based_on.lower():
+                                    detection_methods.append("jsonld_isBasedOn")
+                                    evidence.append(f"isBasedOn={is_based_on[:80]}")
+                                    normalized = self._normalize_wire_service_name(
+                                        service
+                                    )
+                                    if normalized and normalized not in wire_services:
+                                        raw_sources.append(service)
+                                        wire_services.append(normalized)
+                                    break
 
-        # Only return if we found actual syndication signals, not just network membership
-        if not has_syndication_signal or not raw_source:
+                        # Check mainEntityOfPage.@id for cross-domain canonical
+                        main_entity = item.get("mainEntityOfPage")
+                        if isinstance(main_entity, dict):
+                            entity_id = main_entity.get("@id", "")
+                            if entity_id:
+                                for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                                    if domain in entity_id.lower():
+                                        detection_methods.append("jsonld_mainEntity")
+                                        evidence.append(
+                                            f"mainEntityOfPage={entity_id[:80]}"
+                                        )
+                                        normalized = self._normalize_wire_service_name(
+                                            service
+                                        )
+                                        if (
+                                            normalized
+                                            and normalized not in wire_services
+                                        ):
+                                            raw_sources.append(service)
+                                            wire_services.append(normalized)
+                                        break
+
+                        # Check Gannett-specific contentSourceCode in embedded metadata
+                        metadata_str = item.get("metadata", "")
+                        if isinstance(metadata_str, str) and metadata_str:
+                            try:
+                                meta_obj = json.loads(metadata_str)
+                                source_code = meta_obj.get("contentSourceCode", "")
+                                if source_code == "USAT":
+                                    detection_methods.append("jsonld_contentSourceCode")
+                                    evidence.append(f"contentSourceCode={source_code}")
+                                    normalized = self._normalize_wire_service_name(
+                                        "USA Today"
+                                    )
+                                    if normalized and normalized not in wire_services:
+                                        raw_sources.append("USA Today")
+                                        wire_services.append(normalized)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+        # 4. Check dataLayer/CMS syndication fields
+        # tncms.syndication.source, tncms.syndication.origin, townnews.content.source
+        syndication_source_match = _DATALAYER_SYNDICATION_SOURCE_RE.search(html_text)
+        if syndication_source_match:
+            source_value = syndication_source_match.group(1).strip()
+            # Syndication source often contains the external source name
+            if source_value:
+                detection_methods.append("datalayer_syndication")
+                raw_sources.append(source_value)
+                evidence.append(f"syndication.source={source_value[:50]}")
+                normalized = self._normalize_wire_service_name(source_value)
+                if normalized and normalized not in wire_services:
+                    wire_services.append(normalized)
+
+        syndication_origin_match = _DATALAYER_SYNDICATION_ORIGIN_RE.search(html_text)
+        if syndication_origin_match:
+            origin_value = syndication_origin_match.group(1).strip()
+            if origin_value:
+                evidence.append(f"syndication.origin={origin_value[:50]}")
+                # Origin URLs can also indicate wire services
+                origin_lower = origin_value.lower()
+                for domain, service in _WIRE_SERVICE_DOMAINS.items():
+                    if domain in origin_lower:
+                        detection_methods.append("datalayer_origin")
+                        raw_sources.append(service)
+                        normalized = self._normalize_wire_service_name(service)
+                        if normalized and normalized not in wire_services:
+                            wire_services.append(normalized)
+                        break
+
+        # Return if any signals were detected
+        if not wire_services and not detection_methods:
             return None
 
-        normalized = self._normalize_wire_service_name(raw_source)
-        if not normalized:
-            return None
-
+        detected_by = (
+            detection_methods if detection_methods else ["structured_metadata"]
+        )
         return {
-            "detected_by": ["gannett_jsonld"],
-            "raw_source_name": [raw_source],
-            "wire_services": [normalized],
-            "evidence": detection_evidence,
+            "detected_by": list(set(detected_by)),
+            "raw_source_name": list(set(raw_sources)),
+            "wire_services": wire_services,
+            "evidence": evidence,
         }
 
+    def _get_wire_author_patterns(self) -> list[tuple[str, str, bool]]:
+        """Load author patterns from wire_services table with caching.
+
+        Returns list of (pattern, service_name, case_sensitive) tuples.
+        """
+        import time
+
+        # Check cache (5 minute TTL)
+        now = time.time()
+        if (
+            hasattr(self, "_wire_author_patterns_cache")
+            and hasattr(self, "_wire_author_patterns_timestamp")
+            and (now - self._wire_author_patterns_timestamp) < 300
+        ):
+            return self._wire_author_patterns_cache
+
+        try:
+            from src.models import WireService
+            from src.models.database import DatabaseManager
+
+            db = DatabaseManager()
+            with db.get_session() as session:
+                patterns = (
+                    session.query(
+                        WireService.pattern,
+                        WireService.service_name,
+                        WireService.case_sensitive,
+                    )
+                    .filter(WireService.active.is_(True))
+                    .filter(WireService.pattern_type == "author")
+                    .order_by(WireService.priority, WireService.id)
+                    .all()
+                )
+                result = [(p[0], p[1], p[2]) for p in patterns]
+                self._wire_author_patterns_cache = result
+                self._wire_author_patterns_timestamp = now
+                return result
+        except Exception:
+            # Fallback to empty list if DB unavailable
+            return []
+
+    def _match_wire_pattern_in_text(
+        self, text: str | None
+    ) -> tuple[str | None, str | None]:
+        """Match text against DB wire service author patterns.
+
+        Uses regex patterns from wire_services table (pattern_type='author').
+
+        Returns (service_name, matched_pattern) or (None, None).
+        """
+        if not text:
+            return None, None
+
+        patterns = self._get_wire_author_patterns()
+        for pattern, service_name, case_sensitive in patterns:
+            try:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                if re.search(pattern, text, flags):
+                    return service_name, pattern
+            except re.error:
+                # Invalid regex pattern, skip it
+                continue
+
+        return None, None
+
     def _normalize_wire_service_name(self, source_name: str | None) -> str | None:
-        """Normalize raw source names to canonical wire services we track."""
+        """Normalize raw source names to canonical wire services.
+
+        First tries exact match against known names, then falls back to
+        DB pattern matching for more complex patterns.
+        """
         if not source_name:
             return None
 
+        # Quick exact match lookup for common names
         normalized_map = {
             "associated press": "The Associated Press",
             "the associated press": "The Associated Press",
             "ap": "The Associated Press",
             "ap news": "The Associated Press",
             "apnews": "The Associated Press",
+            "ap national": "The Associated Press",
+            "ap regional": "The Associated Press",
             "reuters": "Reuters",
             "bloomberg": "Bloomberg",
+            "bloomberg news": "Bloomberg",
             "agence france-presse": "Agence France-Presse",
             "agence france presse": "Agence France-Presse",
             "afp": "Agence France-Presse",
             "tribune news service": "Tribune News Service",
+            "tribune content agency": "Tribune News Service",
             "usa today": "USA Today",
             "usatoday": "USA Today",
+            "cnn": "CNN",
+            "cnn wire": "CNN",
+            "fox news": "Fox News",
+            "nbc news": "NBC News",
+            "abc news": "ABC News",
+            "cbs news": "CBS News",
+            "npr": "NPR",
+            "pbs": "PBS",
+            "upi": "UPI",
+            "united press international": "UPI",
+            "healthday": "HealthDay",
+            "healthday news": "HealthDay",
+            "washington post": "Washington Post",
+            "the washington post": "Washington Post",
+            "new york times": "New York Times",
+            "the new york times": "New York Times",
+            "los angeles times": "Los Angeles Times",
+            "la times": "Los Angeles Times",
+            "gray news": "Gray News",
+            "states newsroom": "States Newsroom",
+            "stacker": "Stacker",
+            "talker news": "Talker News",
         }
 
         lookup_key = source_name.strip().lower()
-        return normalized_map.get(lookup_key)
+        exact_match = normalized_map.get(lookup_key)
+        if exact_match:
+            return exact_match
+
+        # Fall back to DB pattern matching
+        service_name, _ = self._match_wire_pattern_in_text(source_name)
+        return service_name
+
+    def _extract_wire_from_author_string(
+        self, author_str: str | None
+    ) -> tuple[str | None, str | None]:
+        """Extract wire service from author string using DB patterns.
+
+        Handles patterns like:
+        - "TERESA CEROJANO, Associated Press"
+        - "Hanna Park, Betsy Klein, CNN"
+        - "John Doe | Reuters"
+
+        Returns (service_name, matched_pattern) or (None, None).
+        """
+        return self._match_wire_pattern_in_text(author_str)
 
     def _record_publish_date_details(
         self, source: str, details: Optional[Dict[str, Any]] = None

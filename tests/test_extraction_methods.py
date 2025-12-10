@@ -291,6 +291,8 @@ class TestContentExtractor:
         mock_html_complete,
     ):
         monkeypatch.setattr(crawler_module, "NEWSPAPER_AVAILABLE", True)
+        # Disable mcmetadata so newspaper4k is used
+        extractor.use_mcmetadata = False
 
         cached_html = mock_html_complete
         captured = {"html": None, "url": None}

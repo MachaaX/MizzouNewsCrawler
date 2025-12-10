@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "/tmp/wire_backfill.py", line 15, in <module>
-    from src.models.database import DatabaseManager
-ModuleNotFoundError: No module named 'src'
-command terminated with exit code 1
