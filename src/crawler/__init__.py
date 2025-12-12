@@ -2633,7 +2633,17 @@ class ContentExtractor:
         height = random.randint(768, 1080)
         options.add_argument(f"--window-size={width},{height}")
 
-        # Realistic user agent (automatically handled by undetected-chrome)
+        # CRITICAL: Explicitly set realistic user agent to hide headless indicator
+        # UC's auto-handling leaks "HeadlessChrome" in the UA string which PerimeterX detects
+        realistic_ua = random.choice(
+            [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            ]
+        )
+        options.add_argument(f"--user-agent={realistic_ua}")
 
         # Optional proxy for Selenium
         selenium_proxy = os.getenv("SELENIUM_PROXY")
@@ -2673,6 +2683,16 @@ class ContentExtractor:
         # Set timeouts - reduced for faster extraction
         driver.set_page_load_timeout(15)  # Reduced from 30
         driver.implicitly_wait(5)  # Reduced from 10
+
+        # CRITICAL: Override User-Agent via CDP to hide headless indicator
+        # The command-line arg doesn't always take effect, CDP is more reliable
+        try:
+            driver.execute_cdp_cmd(
+                "Network.setUserAgentOverride",
+                {"userAgent": realistic_ua},
+            )
+        except Exception as e:
+            logger.debug(f"CDP UA override failed (non-fatal): {e}")
 
         # CRITICAL FIX: Set command executor timeout to prevent 147s delays
         # Default timeout is 120s, but Selenium waits an additional ~27s
