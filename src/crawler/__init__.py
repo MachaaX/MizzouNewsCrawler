@@ -1224,7 +1224,9 @@ class ContentExtractor:
         }
         return protection_type in js_required_protections
 
-    def _mark_domain_special_extraction(self, domain: str, protection_type: str, method: str = 'selenium') -> None:
+    def _mark_domain_special_extraction(
+        self, domain: str, protection_type: str, method: str = "selenium"
+    ) -> None:
         """Mark a domain as requiring special extraction method.
 
         Called when we detect bot protection that requires non-standard extraction.
@@ -1243,8 +1245,8 @@ class ContentExtractor:
         from src.models.database import DatabaseManager
 
         # Map strong bot protections to unblock method
-        if protection_type in {'perimeterx', 'datadome', 'akamai'}:
-            method = 'unblock'
+        if protection_type in {"perimeterx", "datadome", "akamai"}:
+            method = "unblock"
 
         try:
             db = DatabaseManager()
@@ -1264,7 +1266,7 @@ class ContentExtractor:
                     {
                         "host": domain,
                         "method": method,
-                        "is_selenium": method == 'selenium',
+                        "is_selenium": method == "selenium",
                         "protection_type": protection_type,
                         "detected_at": datetime.utcnow(),
                     },
@@ -1309,9 +1311,9 @@ class ContentExtractor:
                 ).fetchone()
 
                 if row:
-                    result = (row[0] or 'http', row[1])
+                    result = (row[0] or "http", row[1])
                 else:
-                    result = ('http', None)
+                    result = ("http", None)
 
                 # Cache the result
                 if not hasattr(self, "_extraction_method_cache"):
@@ -1321,7 +1323,7 @@ class ContentExtractor:
 
         except Exception as e:
             logger.debug(f"Failed to check extraction method for {domain}: {e}")
-            return ('http', None)
+            return ("http", None)
 
     def _handle_captcha_backoff(self, domain: str) -> None:
         """Apply extended backoff for CAPTCHA/challenge detections."""
@@ -1498,14 +1500,14 @@ class ContentExtractor:
         # Check if domain requires special extraction method
         domain = urlparse(url).netloc
         extraction_method, protection_type = self._get_domain_extraction_method(domain)
-        skip_http_methods = extraction_method in {'selenium', 'unblock'}
+        skip_http_methods = extraction_method in {"selenium", "unblock"}
 
-        if extraction_method == 'unblock':
+        if extraction_method == "unblock":
             logger.info(
                 f"🔓 Domain {domain} uses unblock proxy extraction "
                 f"(protection: {protection_type}) - using Decodo API"
             )
-        elif extraction_method == 'selenium':
+        elif extraction_method == "selenium":
             logger.info(
                 f"🔒 Domain {domain} uses Selenium extraction "
                 f"(protection: {protection_type}) - skipping HTTP methods"
@@ -1673,7 +1675,7 @@ class ContentExtractor:
         missing_fields = self._get_missing_fields(result)
 
         # For domains marked as 'unblock', use Decodo proxy instead of Selenium
-        if extraction_method == 'unblock' and missing_fields:
+        if extraction_method == "unblock" and missing_fields:
             try:
                 logger.info(
                     f"Attempting unblock proxy extraction for {url} "
@@ -2320,7 +2322,9 @@ class ContentExtractor:
                         # If JS-required protection, mark domain with appropriate extraction method
                         # Strong protections (PerimeterX, DataDome) use 'unblock', others use 'selenium'
                         if self._is_js_required_protection(protection_type):
-                            self._mark_domain_special_extraction(domain, protection_type)
+                            self._mark_domain_special_extraction(
+                                domain, protection_type
+                            )
 
                         # Record bot detection event
                         is_captcha = self._is_js_required_protection(protection_type)
@@ -2600,67 +2604,74 @@ class ContentExtractor:
 
     def _extract_with_unblock_proxy(self, url: str) -> Dict[str, Any]:
         """Extract content using Decodo unblock proxy API for strong bot protection.
-        
+
         Uses Decodo's headless browser API with special headers to bypass
         PerimeterX, DataDome, and other enterprise bot protections.
-        
+
         Args:
             url: URL to extract
-            
+
         Returns:
             Extraction result dict with title, author, content, etc.
         """
         try:
             import warnings
-            warnings.filterwarnings('ignore', message='Unverified HTTPS request')
-            
+
+            warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+
             # Get Decodo unblock proxy credentials from env
-            proxy_url_env = os.getenv("UNBLOCK_PROXY_URL", "https://unblock.decodo.com:60000")
+            proxy_url_env = os.getenv(
+                "UNBLOCK_PROXY_URL", "https://unblock.decodo.com:60000"
+            )
             proxy_user = os.getenv("UNBLOCK_PROXY_USER", "U0000332559")
-            proxy_pass = os.getenv("UNBLOCK_PROXY_PASS", "PW_1b20cd078bbfbf554faa89e9af56f7ea8")
-            
+            proxy_pass = os.getenv(
+                "UNBLOCK_PROXY_PASS", "PW_1b20cd078bbfbf554faa89e9af56f7ea8"
+            )
+
             # Build authenticated proxy URL
             if "://" in proxy_url_env:
                 scheme, remainder = proxy_url_env.split("://", 1)
                 proxy_url = f"{scheme}://{proxy_user}:{proxy_pass}@{remainder}"
             else:
                 proxy_url = f"https://{proxy_user}:{proxy_pass}@{proxy_url_env}"
-            
+
             # Decodo API headers for headless browser
             headers = {
-                'X-SU-Session-Id': 'mizzou-crawler',
-                'X-SU-Geo': 'United States',
-                'X-SU-Locale': 'en-us',
-                'X-SU-Headless': 'html',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                "X-SU-Session-Id": "mizzou-crawler",
+                "X-SU-Geo": "United States",
+                "X-SU-Locale": "en-us",
+                "X-SU-Headless": "html",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             }
-            
+
             logger.info(f"Fetching {url} via Decodo unblock proxy")
-            
+
             response = requests.get(
                 url,
                 headers=headers,
-                proxies={'http': proxy_url, 'https': proxy_url},
+                proxies={"http": proxy_url, "https": proxy_url},
                 verify=False,
-                timeout=30
+                timeout=30,
             )
-            
+
             html = response.text
             html_len = len(html)
-            
+
             logger.info(f"Unblock proxy returned {html_len} bytes for {url}")
-            
+
             # Check if still blocked
             if "Access to this page has been denied" in html or html_len < 5000:
-                logger.warning(f"Unblock proxy may be blocked for {url} ({html_len} bytes)")
+                logger.warning(
+                    f"Unblock proxy may be blocked for {url} ({html_len} bytes)"
+                )
                 return {}
-            
+
             # Update wire hints from HTML
             self._update_wire_hints_from_html(html, url)
-            
+
             # Parse with BeautifulSoup
             soup = BeautifulSoup(html, "html.parser")
-            
+
             result = {
                 "url": url,
                 "title": self._extract_title(soup),
@@ -2676,12 +2687,12 @@ class ContentExtractor:
                 },
                 "extracted_at": datetime.utcnow().isoformat(),
             }
-            
+
             self._attach_publish_date_fallback_metadata(result)
-            
+
             logger.info(f"✅ Unblock proxy extraction succeeded for {url}")
             return result
-            
+
         except Exception as e:
             logger.error(f"Unblock proxy extraction failed for {url}: {e}")
             return {}
@@ -2797,14 +2808,17 @@ class ContentExtractor:
         if selenium_proxy:
             # Parse proxy URL: https://user:pass@host:port
             import re
-            proxy_match = re.match(r'https?://([^:]+):([^@]+)@([^:]+):(\d+)', selenium_proxy)
+
+            proxy_match = re.match(
+                r"https?://([^:]+):([^@]+)@([^:]+):(\d+)", selenium_proxy
+            )
             if proxy_match:
                 proxy_user, proxy_pass, proxy_host, proxy_port = proxy_match.groups()
-                
+
                 # Create Chrome extension for proxy authentication
-                import zipfile
                 import tempfile
-                
+                import zipfile
+
                 manifest_json = """{
                     "version": "1.0.0",
                     "manifest_version": 2,
@@ -2813,7 +2827,7 @@ class ContentExtractor:
                     "background": {"scripts": ["background.js"]},
                     "minimum_chrome_version": "76.0.0"
                 }"""
-                
+
                 background_js = f"""
                 var config = {{
                     mode: "fixed_servers",
@@ -2844,15 +2858,17 @@ class ContentExtractor:
                     ['blocking']
                 );
                 """
-                
+
                 # Create extension zip file
-                proxy_extension_path = tempfile.mktemp(suffix='.zip')
-                with zipfile.ZipFile(proxy_extension_path, 'w') as zp:
+                proxy_extension_path = tempfile.mktemp(suffix=".zip")
+                with zipfile.ZipFile(proxy_extension_path, "w") as zp:
                     zp.writestr("manifest.json", manifest_json)
                     zp.writestr("background.js", background_js)
-                
+
                 options.add_extension(proxy_extension_path)
-                logger.debug(f"Configured proxy extension for {proxy_host}:{proxy_port}")
+                logger.debug(
+                    f"Configured proxy extension for {proxy_host}:{proxy_port}"
+                )
             else:
                 logger.warning(f"Could not parse proxy URL: {selenium_proxy}")
 

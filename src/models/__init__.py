@@ -586,7 +586,7 @@ class Source(Base):
     # Extraction method for this source: 'http' (default), 'selenium', 'unblock'
     # 'unblock' uses Decodo headless browser API for strong bot protection bypass
     extraction_method = Column(
-        String(32), default='http', nullable=False, server_default=text("'http'")
+        String(32), default="http", nullable=False, server_default=text("'http'")
     )
     # Legacy field - kept for backward compatibility, maps to extraction_method
     selenium_only = Column(

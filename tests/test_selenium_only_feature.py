@@ -228,7 +228,7 @@ class TestSeleniumOnlyDatabaseMethods:
             extractor._extraction_method_cache = {}
 
             result = extractor._get_domain_extraction_method("example.com")
-            assert result == ('http', None)
+            assert result == ("http", None)
 
     def test_get_domain_extraction_method_returns_unblock_for_perimeterx(self):
         """Should return 'unblock' for domains with PerimeterX."""
@@ -241,7 +241,7 @@ class TestSeleniumOnlyDatabaseMethods:
             )
             # Simulate database returning extraction_method='unblock', protection_type='perimeterx'
             mock_session.execute.return_value.fetchone.return_value = (
-                'unblock',
+                "unblock",
                 "perimeterx",
             )
 
@@ -249,7 +249,7 @@ class TestSeleniumOnlyDatabaseMethods:
             extractor._extraction_method_cache = {}
 
             result = extractor._get_domain_extraction_method("fox4kc.com")
-            assert result == ('unblock', "perimeterx")
+            assert result == ("unblock", "perimeterx")
 
     def test_mark_domain_special_extraction_updates_database(self):
         """Should update database when marking domain with special extraction."""
@@ -277,7 +277,9 @@ class TestExtractionFlowWithSeleniumOnly:
         extractor = ContentExtractor()
 
         with patch.object(
-            extractor, "_get_domain_extraction_method", return_value=('unblock', "perimeterx")
+            extractor,
+            "_get_domain_extraction_method",
+            return_value=("unblock", "perimeterx"),
         ) as mock_check:
             with patch.object(extractor, "_extract_with_selenium") as mock_selenium:
                 mock_selenium.return_value = {

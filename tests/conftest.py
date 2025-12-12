@@ -84,7 +84,7 @@ def mock_extraction_method_lookup(monkeypatch):
     monkeypatch.setattr(
         ContentExtractor,
         "_get_domain_extraction_method",
-        lambda self, domain: ('http', None),
+        lambda self, domain: ("http", None),
     )
 
 
