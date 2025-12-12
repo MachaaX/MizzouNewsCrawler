@@ -193,27 +193,27 @@ class TestBotProtectionTypeDetection:
 
 
 # Store original method for tests that need to test the real implementation
-_original_is_domain_selenium_only = ContentExtractor._is_domain_selenium_only
+_original_get_domain_extraction_method = ContentExtractor._get_domain_extraction_method
 
 
 class TestSeleniumOnlyDatabaseMethods:
-    """Test _is_domain_selenium_only and _mark_domain_selenium_only methods."""
+    """Test _get_domain_extraction_method and _mark_domain_special_extraction methods."""
 
     @pytest.fixture(autouse=True)
     def restore_real_method(self, monkeypatch):
-        """Restore the real _is_domain_selenium_only method for these tests.
+        """Restore the real _get_domain_extraction_method method for these tests.
 
         The global autouse fixture mocks this method, but we need the real
         implementation to test it.
         """
         monkeypatch.setattr(
             ContentExtractor,
-            "_is_domain_selenium_only",
-            _original_is_domain_selenium_only,
+            "_get_domain_extraction_method",
+            _original_get_domain_extraction_method,
         )
 
-    def test_is_domain_selenium_only_returns_false_by_default(self):
-        """New domains should not be selenium_only by default."""
+    def test_get_domain_extraction_method_returns_http_by_default(self):
+        """New domains should return 'http' method by default."""
         extractor = ContentExtractor()
 
         with patch("src.models.database.DatabaseManager") as mock_db_cls:
@@ -225,13 +225,13 @@ class TestSeleniumOnlyDatabaseMethods:
             mock_session.execute.return_value.fetchone.return_value = None
 
             # Clear any cache
-            extractor._selenium_only_cache = {}
+            extractor._extraction_method_cache = {}
 
-            result = extractor._is_domain_selenium_only("example.com")
-            assert result == (False, None)
+            result = extractor._get_domain_extraction_method("example.com")
+            assert result == ('http', None)
 
-    def test_is_domain_selenium_only_returns_true_when_set(self):
-        """Should return True for domains marked as selenium_only."""
+    def test_get_domain_extraction_method_returns_unblock_for_perimeterx(self):
+        """Should return 'unblock' for domains with PerimeterX."""
         extractor = ContentExtractor()
 
         with patch("src.models.database.DatabaseManager") as mock_db_cls:
@@ -239,20 +239,20 @@ class TestSeleniumOnlyDatabaseMethods:
             mock_db_cls.return_value.get_session.return_value.__enter__.return_value = (
                 mock_session
             )
-            # Simulate database returning selenium_only=True, protection_type='perimeterx'
+            # Simulate database returning extraction_method='unblock', protection_type='perimeterx'
             mock_session.execute.return_value.fetchone.return_value = (
-                True,
+                'unblock',
                 "perimeterx",
             )
 
             # Clear any cache
-            extractor._selenium_only_cache = {}
+            extractor._extraction_method_cache = {}
 
-            result = extractor._is_domain_selenium_only("fox4kc.com")
-            assert result == (True, "perimeterx")
+            result = extractor._get_domain_extraction_method("fox4kc.com")
+            assert result == ('unblock', "perimeterx")
 
-    def test_mark_domain_selenium_only_updates_database(self):
-        """Should update database when marking domain as selenium_only."""
+    def test_mark_domain_special_extraction_updates_database(self):
+        """Should update database when marking domain with special extraction."""
         extractor = ContentExtractor()
 
         with patch("src.models.database.DatabaseManager") as mock_db_cls:
@@ -261,7 +261,7 @@ class TestSeleniumOnlyDatabaseMethods:
                 mock_session
             )
 
-            extractor._mark_domain_selenium_only("fox4kc.com", "perimeterx")
+            extractor._mark_domain_special_extraction("fox4kc.com", "perimeterx")
 
             # Verify execute was called (for the UPDATE statement)
             assert mock_session.execute.called
@@ -270,14 +270,14 @@ class TestSeleniumOnlyDatabaseMethods:
 
 
 class TestExtractionFlowWithSeleniumOnly:
-    """Test that extraction flow properly skips HTTP methods for selenium_only domains."""
+    """Test that extraction flow properly skips HTTP methods for selenium/unblock domains."""
 
-    def test_extract_content_checks_selenium_only_flag(self):
-        """extract_content should check selenium_only flag at start."""
+    def test_extract_content_checks_extraction_method(self):
+        """extract_content should check extraction_method at start."""
         extractor = ContentExtractor()
 
         with patch.object(
-            extractor, "_is_domain_selenium_only", return_value=(True, "perimeterx")
+            extractor, "_get_domain_extraction_method", return_value=('unblock', "perimeterx")
         ) as mock_check:
             with patch.object(extractor, "_extract_with_selenium") as mock_selenium:
                 mock_selenium.return_value = {
