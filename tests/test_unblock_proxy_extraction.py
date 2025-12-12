@@ -655,7 +655,6 @@ class TestPostgreSQLIntegration:
     @pytest.fixture(autouse=True)
     def setup_integration_env(self, monkeypatch):
         """Ensure DATABASE_URL matches TEST_DATABASE_URL for integration tests."""
-        import os
 
         if "TEST_DATABASE_URL" in os.environ:
             monkeypatch.setenv("DATABASE_URL", os.environ["TEST_DATABASE_URL"])
