@@ -2645,10 +2645,13 @@ class ContentExtractor:
         )
         options.add_argument(f"--user-agent={realistic_ua}")
 
-        # Optional proxy for Selenium
-        selenium_proxy = os.getenv("SELENIUM_PROXY")
-        if selenium_proxy:
-            options.add_argument(f"--proxy-server={selenium_proxy}")
+        # CRITICAL: Do NOT use proxy for undetected-chromedriver
+        # Decodo proxy leaks fingerprints and causes PerimeterX to block
+        # For PerimeterX sites, direct connection with stealth measures works better
+        # Optional proxy for Selenium (DISABLED for undetected-chromedriver)
+        # selenium_proxy = os.getenv("SELENIUM_PROXY")
+        # if selenium_proxy:
+        #     options.add_argument(f"--proxy-server={selenium_proxy}")
 
         # Read optional binary paths from environment
         # Common envs: CHROME_BIN, GOOGLE_CHROME_BIN, CHROMEDRIVER_PATH
