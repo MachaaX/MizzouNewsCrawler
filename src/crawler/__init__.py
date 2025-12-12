@@ -851,7 +851,7 @@ class ContentExtractor:
                 )
 
         if should_rotate:
-            # Select new user agent (avoid repeating the same one)
+            # Select new user agent (avoid repeating the same one.)
             available_agents = [
                 ua
                 for ua in self.user_agent_pool
