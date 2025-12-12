@@ -492,7 +492,7 @@ class TestFallbackBehavior:
         """Test that parsing errors still allow BeautifulSoup fallback."""
         with (
             patch.object(
-                extractor, "_is_domain_selenium_only", return_value=(False, None)
+                extractor, "_get_domain_extraction_method", return_value=("http", None)
             ),
             patch.object(extractor, "_extract_with_newspaper") as mock_newspaper,
             patch.object(extractor, "_extract_with_beautifulsoup") as mock_bs,
@@ -507,6 +507,7 @@ class TestFallbackBehavior:
                 ["title", "content"],  # After newspaper fails
                 ["title", "content"],  # Before BS fallback
                 [],  # After BS fallback
+                [],  # Selenium check
                 [],  # Final check
             ]
 
@@ -529,7 +530,7 @@ class TestFallbackBehavior:
         """Test that connection errors still allow BeautifulSoup fallback."""
         with (
             patch.object(
-                extractor, "_is_domain_selenium_only", return_value=(False, None)
+                extractor, "_get_domain_extraction_method", return_value=("http", None)
             ),
             patch.object(extractor, "_extract_with_newspaper") as mock_newspaper,
             patch.object(extractor, "_extract_with_beautifulsoup") as mock_bs,
@@ -543,6 +544,7 @@ class TestFallbackBehavior:
                 ["title", "content"],  # After newspaper
                 ["title", "content"],  # Before BS
                 [],  # After BS
+                [],  # Selenium check
                 [],  # Final
             ]
 
@@ -632,7 +634,7 @@ class TestMetricsTracking:
 
         with (
             patch.object(
-                extractor, "_is_domain_selenium_only", return_value=(False, None)
+                extractor, "_get_domain_extraction_method", return_value=("http", None)
             ),
             patch.object(extractor, "_get_domain_session") as mock_session,
         ):
@@ -659,7 +661,7 @@ class TestMetricsTracking:
 
         with (
             patch.object(
-                extractor, "_is_domain_selenium_only", return_value=(False, None)
+                extractor, "_get_domain_extraction_method", return_value=("http", None)
             ),
             patch.object(extractor, "_get_domain_session") as mock_session,
             patch.object(

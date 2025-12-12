@@ -299,7 +299,7 @@ class TestExtractionFlowWithSeleniumOnly:
         extractor = ContentExtractor()
 
         with patch.object(
-            extractor, "_is_domain_selenium_only", return_value=(True, "perimeterx")
+            extractor, "_get_domain_extraction_method", return_value=("selenium", "perimeterx")
         ):
             with patch.object(extractor, "_extract_with_selenium") as mock_selenium:
                 with patch.object(
@@ -320,7 +320,7 @@ class TestExtractionFlowWithSeleniumOnly:
         extractor = ContentExtractor()
 
         with patch.object(
-            extractor, "_is_domain_selenium_only", return_value=(True, "perimeterx")
+            extractor, "_get_domain_extraction_method", return_value=("selenium", "perimeterx")
         ):
             with patch.object(extractor, "_extract_with_selenium") as mock_selenium:
                 with patch.object(
@@ -341,7 +341,7 @@ class TestExtractionFlowWithSeleniumOnly:
         extractor = ContentExtractor()
 
         with patch.object(
-            extractor, "_is_domain_selenium_only", return_value=(True, "perimeterx")
+            extractor, "_get_domain_extraction_method", return_value=("selenium", "perimeterx")
         ):
             with patch.object(extractor, "_extract_with_selenium") as mock_selenium:
                 mock_selenium.return_value = {
@@ -359,7 +359,7 @@ class TestExtractionFlowWithSeleniumOnly:
         extractor = ContentExtractor()
 
         with patch.object(
-            extractor, "_is_domain_selenium_only", return_value=(False, None)
+            extractor, "_get_domain_extraction_method", return_value=("http", None)
         ):
             with patch.object(extractor, "_extract_with_mcmetadata") as mock_mcmetadata:
                 mock_mcmetadata.return_value = {
