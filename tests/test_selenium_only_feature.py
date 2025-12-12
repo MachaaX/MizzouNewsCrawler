@@ -202,7 +202,7 @@ class TestSeleniumOnlyDatabaseMethods:
     @pytest.fixture(autouse=True)
     def restore_real_method(self, monkeypatch):
         """Restore the real _is_domain_selenium_only method for these tests.
-        
+
         The global autouse fixture mocks this method, but we need the real
         implementation to test it.
         """
