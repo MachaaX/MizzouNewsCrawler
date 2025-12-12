@@ -147,6 +147,9 @@ class TestContentExtractor:
 
             author = payload.get("author")
             if author:
+                # mcmetadata now returns article_author directly (from structured data)
+                converted["article_author"] = author
+                converted["author_extraction_method"] = "structured_json_ld"
                 converted["authors"] = [author]
 
             return converted
