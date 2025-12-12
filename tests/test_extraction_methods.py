@@ -764,7 +764,6 @@ class TestContentExtractor:
 class TestRealWorldExtraction:
     """Integration tests for real URLs with missing fields."""
 
-    @pytest.mark.integration
     def test_extraction_on_real_urls_with_missing_fields(
         self, extractor, requests_mock
     ):
