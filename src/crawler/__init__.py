@@ -2645,13 +2645,72 @@ class ContentExtractor:
         )
         options.add_argument(f"--user-agent={realistic_ua}")
 
-        # CRITICAL: Do NOT use proxy for undetected-chromedriver
-        # Decodo proxy leaks fingerprints and causes PerimeterX to block
-        # For PerimeterX sites, direct connection with stealth measures works better
-        # Optional proxy for Selenium (DISABLED for undetected-chromedriver)
-        # selenium_proxy = os.getenv("SELENIUM_PROXY")
-        # if selenium_proxy:
-        #     options.add_argument(f"--proxy-server={selenium_proxy}")
+        # CRITICAL: Configure proxy with authentication for PerimeterX bypass
+        # PerimeterX blocks GKE datacenter IPs, residential proxy required
+        # Use Chrome extension for proxy auth (standard approach)
+        selenium_proxy = os.getenv("SELENIUM_PROXY")
+        proxy_extension_path = None
+        if selenium_proxy:
+            # Parse proxy URL: https://user:pass@host:port
+            import re
+            proxy_match = re.match(r'https?://([^:]+):([^@]+)@([^:]+):(\d+)', selenium_proxy)
+            if proxy_match:
+                proxy_user, proxy_pass, proxy_host, proxy_port = proxy_match.groups()
+                
+                # Create Chrome extension for proxy authentication
+                import zipfile
+                import tempfile
+                
+                manifest_json = """{
+                    "version": "1.0.0",
+                    "manifest_version": 2,
+                    "name": "Chrome Proxy Auth",
+                    "permissions": ["proxy", "tabs", "unlimitedStorage", "storage", "<all_urls>", "webRequest", "webRequestBlocking"],
+                    "background": {"scripts": ["background.js"]},
+                    "minimum_chrome_version": "76.0.0"
+                }"""
+                
+                background_js = f"""
+                var config = {{
+                    mode: "fixed_servers",
+                    rules: {{
+                        singleProxy: {{
+                            scheme: "http",
+                            host: "{proxy_host}",
+                            port: parseInt({proxy_port})
+                        }},
+                        bypassList: ["localhost"]
+                    }}
+                }};
+
+                chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+
+                function callbackFn(details) {{
+                    return {{
+                        authCredentials: {{
+                            username: "{proxy_user}",
+                            password: "{proxy_pass}"
+                        }}
+                    }};
+                }}
+
+                chrome.webRequest.onAuthRequired.addListener(
+                    callbackFn,
+                    {{urls: ["<all_urls>"]}},
+                    ['blocking']
+                );
+                """
+                
+                # Create extension zip file
+                proxy_extension_path = tempfile.mktemp(suffix='.zip')
+                with zipfile.ZipFile(proxy_extension_path, 'w') as zp:
+                    zp.writestr("manifest.json", manifest_json)
+                    zp.writestr("background.js", background_js)
+                
+                options.add_extension(proxy_extension_path)
+                logger.debug(f"Configured proxy extension for {proxy_host}:{proxy_port}")
+            else:
+                logger.warning(f"Could not parse proxy URL: {selenium_proxy}")
 
         # Read optional binary paths from environment
         # Common envs: CHROME_BIN, GOOGLE_CHROME_BIN, CHROMEDRIVER_PATH
@@ -2682,6 +2741,13 @@ class ContentExtractor:
         except Exception as e:
             logger.warning(f"Failed to create undetected driver: {e}")
             raise
+        finally:
+            # Clean up temporary proxy extension file
+            if proxy_extension_path and os.path.exists(proxy_extension_path):
+                try:
+                    os.unlink(proxy_extension_path)
+                except Exception:
+                    pass  # Non-critical cleanup
 
         # Set timeouts - reduced for faster extraction
         driver.set_page_load_timeout(15)  # Reduced from 30
