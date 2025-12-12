@@ -1322,7 +1322,9 @@ class ContentExtractor:
                 return result
 
         except Exception as e:
-            logger.error(f"Failed to check extraction method for {domain}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to check extraction method for {domain}: {e}", exc_info=True
+            )
             print(f"DEBUG: Failed to check extraction method for {domain}: {e}")
             return ("http", None)
 

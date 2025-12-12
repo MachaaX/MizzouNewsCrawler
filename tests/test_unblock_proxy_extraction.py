@@ -697,9 +697,10 @@ class TestPostgreSQLIntegration:
     def test_get_domain_extraction_method_queries_database(self, cloud_sql_session):
         """Test _get_domain_extraction_method actually queries PostgreSQL."""
         import os
+
         print(f"DEBUG: DATABASE_URL={os.environ.get('DATABASE_URL')}")
         print(f"DEBUG: TEST_DATABASE_URL={os.environ.get('TEST_DATABASE_URL')}")
-        
+
         # Insert test domain with unblock method
         cloud_sql_session.execute(
             text(
