@@ -2618,7 +2618,8 @@ class ContentExtractor:
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-web-security")
         options.add_argument("--disable-features=VizDisplayCompositor")
-        options.add_argument("--disable-extensions")
+        # Don't disable extensions - we use proxy auth extension
+        # options.add_argument("--disable-extensions")
         options.add_argument("--disable-plugins")
         # Add headless argument explicitly for better container compatibility
         options.add_argument("--headless=new")
