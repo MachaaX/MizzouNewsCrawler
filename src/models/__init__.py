@@ -580,10 +580,15 @@ class Source(Base):
     last_bot_detection_at = Column(DateTime, index=True)
     bot_detection_metadata = Column(JSON)
 
-    # Bot protection detection - specific protection types require Selenium-only
+    # Bot protection detection - specific protection types require special extraction
     # Values: 'perimeterx', 'cloudflare', 'datadome', 'akamai', 'incapsula', etc.
     bot_protection_type = Column(String(64), nullable=True, index=True)
-    # When True, skip HTTP requests and use Selenium directly
+    # Extraction method for this source: 'http' (default), 'selenium', 'unblock'
+    # 'unblock' uses Decodo headless browser API for strong bot protection bypass
+    extraction_method = Column(
+        String(32), default='http', nullable=False, server_default=text("'http'")
+    )
+    # Legacy field - kept for backward compatibility, maps to extraction_method
     selenium_only = Column(
         Boolean, default=False, nullable=False, server_default=text("0")
     )
