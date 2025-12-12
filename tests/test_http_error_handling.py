@@ -26,7 +26,10 @@ from src.crawler import ContentExtractor, NotFoundError, RateLimitError  # noqa:
 @pytest.fixture
 def extractor():
     """Create a ContentExtractor instance for testing."""
-    return ContentExtractor()
+    ext = ContentExtractor()
+    # Pre-populate cache to avoid database lookups in tests
+    ext._selenium_only_cache = {}
+    return ext
 
 
 @pytest.fixture
@@ -488,6 +491,9 @@ class TestFallbackBehavior:
     def test_parsing_error_allows_beautifulsoup_fallback(self, extractor):
         """Test that parsing errors still allow BeautifulSoup fallback."""
         with (
+            patch.object(
+                extractor, "_is_domain_selenium_only", return_value=(False, None)
+            ),
             patch.object(extractor, "_extract_with_newspaper") as mock_newspaper,
             patch.object(extractor, "_extract_with_beautifulsoup") as mock_bs,
             patch.object(extractor, "_get_missing_fields") as mock_missing,
@@ -522,6 +528,9 @@ class TestFallbackBehavior:
     def test_connection_error_allows_beautifulsoup_fallback(self, extractor):
         """Test that connection errors still allow BeautifulSoup fallback."""
         with (
+            patch.object(
+                extractor, "_is_domain_selenium_only", return_value=(False, None)
+            ),
             patch.object(extractor, "_extract_with_newspaper") as mock_newspaper,
             patch.object(extractor, "_extract_with_beautifulsoup") as mock_bs,
             patch.object(extractor, "_get_missing_fields") as mock_missing,
@@ -621,7 +630,12 @@ class TestMetricsTracking:
         """Test that 404 error is tracked in metrics before raising NotFoundError."""
         mock_metrics = Mock()
 
-        with patch.object(extractor, "_get_domain_session") as mock_session:
+        with (
+            patch.object(
+                extractor, "_is_domain_selenium_only", return_value=(False, None)
+            ),
+            patch.object(extractor, "_get_domain_session") as mock_session,
+        ):
             mock_sess = Mock()
             mock_sess.get.return_value = mock_response(404, "Not Found")
             mock_session.return_value = mock_sess
@@ -644,6 +658,9 @@ class TestMetricsTracking:
         mock_metrics = Mock()
 
         with (
+            patch.object(
+                extractor, "_is_domain_selenium_only", return_value=(False, None)
+            ),
             patch.object(extractor, "_get_domain_session") as mock_session,
             patch.object(
                 extractor, "_detect_bot_protection_in_response"

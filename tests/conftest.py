@@ -68,6 +68,26 @@ def cleanup_test_database():
             pass  # Ignore cleanup errors
 
 
+@pytest.fixture(autouse=True)
+def mock_selenium_only_lookup(monkeypatch):
+    """Mock _is_domain_selenium_only to prevent DB calls in tests.
+
+    This autouse fixture prevents the ContentExtractor from making database
+    queries when checking if a domain requires Selenium-only extraction.
+    By default, returns (False, None) meaning no selenium_only override.
+
+    Tests that specifically want to test selenium_only behavior should
+    override this by providing their own mock.
+    """
+    from src.crawler import ContentExtractor
+
+    monkeypatch.setattr(
+        ContentExtractor,
+        "_is_domain_selenium_only",
+        lambda self, domain: (False, None),
+    )
+
+
 @pytest.fixture
 def clean_app_state():
     """Fixture to ensure FastAPI app.state is clean between tests.

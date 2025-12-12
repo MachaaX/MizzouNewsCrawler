@@ -16,6 +16,7 @@ from typing import TypedDict
 from sqlalchemy import text
 
 from src.models.database import DatabaseManager
+from src.utils.bot_sensitivity_manager import BotSensitivityManager
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class HousekeepingReport(TypedDict):
     stuck_extraction_articles_warned: int
     stuck_cleaning_articles_warned: int
     stuck_verification_candidates_warned: int
+    bot_sensitivity_decayed: int
     total_actions: int
 
 
@@ -72,6 +74,15 @@ def add_housekeeping_parser(subparsers):
         ),
     )
     parser.add_argument(
+        "--sensitivity-decay-days",
+        type=int,
+        default=7,
+        help=(
+            "Decay bot sensitivity for domains without detection "
+            "for this many days (default: 7)"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would happen without making changes",
@@ -111,6 +122,7 @@ def handle_housekeeping_command(args) -> int:
             "stuck_extraction_articles_warned": 0,
             "stuck_cleaning_articles_warned": 0,
             "stuck_verification_candidates_warned": 0,
+            "bot_sensitivity_decayed": 0,
             "total_actions": 0,
         }
 
@@ -153,6 +165,13 @@ def handle_housekeeping_command(args) -> int:
                 )
             )
 
+        # 6. Decay bot sensitivity for domains without recent detections
+        report["bot_sensitivity_decayed"] = _decay_bot_sensitivity(
+            args.sensitivity_decay_days,
+            args.dry_run,
+            args.verbose,
+        )
+
         # Print summary
         print()
         print("Summary")
@@ -171,6 +190,7 @@ def handle_housekeeping_command(args) -> int:
             f"  Stuck verification candidates warned: "
             f"{report['stuck_verification_candidates_warned']}"
         )
+        print(f"  Bot sensitivity decayed: {report['bot_sensitivity_decayed']}")
         report["total_actions"] = sum(
             [
                 report["null_text_articles_paused"],
@@ -178,6 +198,7 @@ def handle_housekeeping_command(args) -> int:
                 report["stuck_extraction_articles_warned"],
                 report["stuck_cleaning_articles_warned"],
                 report["stuck_verification_candidates_warned"],
+                report["bot_sensitivity_decayed"],
             ]
         )
         print(f"  Total actions: {report['total_actions']}")
@@ -500,3 +521,77 @@ def _check_stuck_verification_candidates(
     print()
 
     return count
+
+
+def _decay_bot_sensitivity(decay_days: int, dry_run: bool, verbose: bool) -> int:
+    """
+    Decay bot sensitivity for domains without recent bot detections.
+
+    This allows domains that were previously flagged to recover over time
+    if they stop triggering bot protection.
+
+    Args:
+        decay_days: Days without detection before decaying sensitivity
+        dry_run: If True, only report what would happen
+        verbose: If True, show detailed information
+
+    Returns:
+        Number of domains with decayed sensitivity
+    """
+    print(f"6️⃣  Decaying bot sensitivity for domains quiet for {decay_days}+ days...")
+    print()
+
+    try:
+        bot_manager = BotSensitivityManager()
+
+        if dry_run:
+            # In dry run, just check what would be decayed
+            with bot_manager.db.get_session() as session:
+                count = session.execute(
+                    text(
+                        f"""
+                        SELECT COUNT(*)
+                        FROM sources
+                        WHERE bot_sensitivity > 3
+                        AND (
+                            last_bot_detection_at IS NULL
+                            OR last_bot_detection_at < NOW() - INTERVAL '{decay_days} days'
+                        )
+                        """
+                    )
+                ).scalar()
+
+            if count == 0:
+                print("   ✓ No domains eligible for sensitivity decay")
+            else:
+                print(f"   Would decay {count} domains (dry run)")
+            return 0
+
+        # Actually perform the decay
+        decayed = bot_manager.decay_sensitivity(
+            days_without_detection=decay_days,
+            decay_amount=1,
+            min_sensitivity=3,
+        )
+
+        if not decayed:
+            print("   ✓ No domains eligible for sensitivity decay")
+            return 0
+
+        print(f"   ✅ Decayed sensitivity for {len(decayed)} domains")
+
+        if verbose:
+            for item in decayed[:10]:  # Show first 10
+                print(
+                    f"     - {item['host']}: "
+                    f"{item['old_sensitivity']} → {item['new_sensitivity']}"
+                )
+            if len(decayed) > 10:
+                print(f"     ... and {len(decayed) - 10} more")
+
+        return len(decayed)
+
+    except Exception as e:
+        logger.error(f"Error decaying bot sensitivity: {e}")
+        print(f"   ❌ Error: {e}")
+        return 0

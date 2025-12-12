@@ -39,12 +39,18 @@ class TestHousekeepingCommand:
             "src.cli.commands.housekeeping.DatabaseManager", return_value=mock_db
         )
 
+        # Mock _decay_bot_sensitivity to avoid database calls
+        mocker.patch(
+            "src.cli.commands.housekeeping._decay_bot_sensitivity", return_value=0
+        )
+
         # Create args object
         args = argparse.Namespace(
             candidate_expiration_days=7,
             extraction_stall_hours=24,
             cleaning_stall_hours=24,
             verification_stall_hours=24,
+            sensitivity_decay_days=7,
             dry_run=True,
             verbose=False,
         )
@@ -74,12 +80,18 @@ class TestHousekeepingCommand:
             "src.cli.commands.housekeeping.DatabaseManager", return_value=mock_db
         )
 
+        # Mock _decay_bot_sensitivity to avoid database calls
+        mocker.patch(
+            "src.cli.commands.housekeeping._decay_bot_sensitivity", return_value=0
+        )
+
         # Create args object
         args = argparse.Namespace(
             candidate_expiration_days=7,
             extraction_stall_hours=24,
             cleaning_stall_hours=24,
             verification_stall_hours=24,
+            sensitivity_decay_days=7,
             dry_run=True,
             verbose=True,
         )
@@ -108,12 +120,18 @@ class TestHousekeepingCommand:
             "src.cli.commands.housekeeping.DatabaseManager", return_value=mock_db
         )
 
+        # Mock _decay_bot_sensitivity to avoid database calls
+        mocker.patch(
+            "src.cli.commands.housekeeping._decay_bot_sensitivity", return_value=0
+        )
+
         # Create args object with custom thresholds
         args = argparse.Namespace(
             candidate_expiration_days=14,
             extraction_stall_hours=48,
             cleaning_stall_hours=48,
             verification_stall_hours=48,
+            sensitivity_decay_days=14,
             dry_run=True,
             verbose=False,
         )
