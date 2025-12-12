@@ -193,7 +193,7 @@ class TestDomainClassificationLogic:
             assert mock_session.execute.called
             call_args = mock_session.execute.call_args
             params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-            assert params['is_selenium'] == True, "selenium_only should be True when method='selenium'"
+            assert params['is_selenium'] is True, "selenium_only should be True when method='selenium'"
 
     def test_mark_domain_special_extraction_clears_selenium_only_for_unblock(self):
         """Should set selenium_only=false when method is 'unblock'."""
@@ -208,7 +208,7 @@ class TestDomainClassificationLogic:
             assert mock_session.execute.called
             call_args = mock_session.execute.call_args
             params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1]
-            assert params['is_selenium'] == False, "selenium_only should be False when method='unblock'"
+            assert params['is_selenium'] is False, "selenium_only should be False when method='unblock'"
 
 
 class TestExtractionFlowRouting:
@@ -665,7 +665,7 @@ class TestPostgreSQLIntegration:
         assert result is not None
         assert result[0] == 'unblock', "extraction_method should be updated to 'unblock'"
         assert result[1] == 'perimeterx', "bot_protection_type should be set"
-        assert result[2] == False, "selenium_only should be False for unblock method"
+        assert result[2] is False, "selenium_only should be False for unblock method"
 
     @pytest.mark.integration
     def test_default_extraction_method_is_http_in_database(self, cloud_sql_session):
