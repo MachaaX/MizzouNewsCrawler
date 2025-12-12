@@ -1113,12 +1113,64 @@ class ContentExtractor:
         content extraction proceed - if there's real bot protection, extraction
         will fail naturally without false positives.
 
-        Returns a string identifying the protection type, or None if not detected.
+        Returns a string identifying the specific protection type:
+        - 'perimeterx' - Human Security / PerimeterX (requires JS + captcha)
+        - 'cloudflare' - Cloudflare (may require JS challenge)
+        - 'datadome' - DataDome bot protection
+        - 'akamai' - Akamai Bot Manager
+        - 'incapsula' - Imperva Incapsula
+        - 'bot_protection' - Generic/unknown bot protection
+        - None if no protection detected
         """
         if not response or not response.text:
             return None
 
         text_lower = response.text.lower()
+        text_original = response.text
+
+        # PerimeterX / Human Security - requires JS execution + captcha
+        # These sites MUST use Selenium, HTTP will never work
+        perimeterx_indicators = [
+            "window._pxappid",
+            "window._pxuuid",
+            "px-captcha",
+            "captcha.px-cloud.net",
+            "humansecurity.com",
+            "pxchk",
+            "_pxhd",  # PerimeterX header cookie
+        ]
+        if any(indicator in text_lower for indicator in perimeterx_indicators):
+            return "perimeterx"
+
+        # DataDome bot protection
+        datadome_indicators = [
+            "datadome",
+            "dd.js",
+            "window.ddjskey",
+            "geo.captcha-delivery.com",
+        ]
+        if any(indicator in text_lower for indicator in datadome_indicators):
+            return "datadome"
+
+        # Akamai Bot Manager
+        akamai_indicators = [
+            "akamai",
+            "_abck",  # Akamai bot cookie
+            "ak_bmsc",
+            "sensor_data",
+        ]
+        if any(indicator in text_lower for indicator in akamai_indicators):
+            return "akamai"
+
+        # Imperva Incapsula
+        incapsula_indicators = [
+            "incapsula",
+            "imperva",
+            "visid_incap",
+            "incap_ses",
+        ]
+        if any(indicator in text_lower for indicator in incapsula_indicators):
+            return "incapsula"
 
         # Cloudflare protection indicators
         cloudflare_indicators = [
@@ -1130,6 +1182,8 @@ class ContentExtractor:
             "just a moment...",
             "cf-ray",
         ]
+        if any(indicator in text_lower for indicator in cloudflare_indicators):
+            return "cloudflare"
 
         # Generic bot protection indicators (only check for active challenges)
         # Note: Exclude passive "grecaptcha" CSS/JS references
@@ -1146,12 +1200,6 @@ class ContentExtractor:
             "solve the captcha",
             "captcha challenge",
         ]
-
-        # Check for Cloudflare first (most common)
-        if any(indicator in text_lower for indicator in cloudflare_indicators):
-            return "cloudflare"
-
-        # Check for general bot protection
         if any(indicator in text_lower for indicator in bot_protection_indicators):
             return "bot_protection"
 
@@ -1160,6 +1208,107 @@ class ContentExtractor:
             return "suspicious_short_response"
 
         return None
+
+    def _is_js_required_protection(self, protection_type: Optional[str]) -> bool:
+        """Check if protection type requires JavaScript execution.
+
+        These protection types cannot be bypassed with HTTP requests alone,
+        even with residential proxies. They require a real browser.
+        """
+        js_required_protections = {
+            "perimeterx",
+            "datadome",
+            "akamai",
+            "incapsula",
+            "cloudflare",  # Cloudflare JS challenge
+        }
+        return protection_type in js_required_protections
+
+    def _mark_domain_selenium_only(self, domain: str, protection_type: str) -> None:
+        """Mark a domain as requiring Selenium-only extraction.
+
+        Called when we detect a JS-based bot protection that cannot be
+        bypassed with HTTP requests. This persists to the database so
+        future extraction attempts skip HTTP entirely.
+        """
+        from datetime import datetime
+
+        from sqlalchemy import text
+
+        from src.models.database import DatabaseManager
+
+        try:
+            db = DatabaseManager()
+            with db.get_session() as session:
+                session.execute(
+                    text(
+                        """
+                        UPDATE sources
+                        SET selenium_only = true,
+                            bot_protection_type = :protection_type,
+                            bot_protection_detected_at = :detected_at
+                        WHERE host = :host
+                        AND (selenium_only = false OR selenium_only IS NULL)
+                    """
+                    ),
+                    {
+                        "host": domain,
+                        "protection_type": protection_type,
+                        "detected_at": datetime.utcnow(),
+                    },
+                )
+                session.commit()
+                logger.info(
+                    f"🔒 Marked {domain} as selenium_only "
+                    f"(protection: {protection_type})"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to mark {domain} as selenium_only: {e}")
+
+    def _is_domain_selenium_only(self, domain: str) -> tuple[bool, Optional[str]]:
+        """Check if a domain is marked as requiring Selenium-only extraction.
+
+        Returns:
+            Tuple of (is_selenium_only, protection_type)
+        """
+        # Check in-memory cache first
+        cache_key = f"selenium_only:{domain}"
+        cached = getattr(self, "_selenium_only_cache", {}).get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            from sqlalchemy import text
+
+            from src.models.database import DatabaseManager
+
+            db = DatabaseManager()
+            with db.get_session() as session:
+                row = session.execute(
+                    text(
+                        """
+                        SELECT selenium_only, bot_protection_type
+                        FROM sources
+                        WHERE host = :host
+                    """
+                    ),
+                    {"host": domain},
+                ).fetchone()
+
+                if row and row[0]:  # selenium_only is True
+                    result = (True, row[1])
+                else:
+                    result = (False, None)
+
+                # Cache the result
+                if not hasattr(self, "_selenium_only_cache"):
+                    self._selenium_only_cache = {}
+                self._selenium_only_cache[cache_key] = result
+                return result
+
+        except Exception as e:
+            logger.debug(f"Failed to check selenium_only for {domain}: {e}")
+            return (False, None)
 
     def _handle_captcha_backoff(self, domain: str) -> None:
         """Apply extended backoff for CAPTCHA/challenge detections."""
@@ -1333,6 +1482,17 @@ class ContentExtractor:
         self._latest_wire_hints = None
         self._latest_cms_metadata = None
 
+        # Check if domain requires Selenium-only extraction (JS bot protection)
+        domain = urlparse(url).netloc
+        is_selenium_only, protection_type = self._is_domain_selenium_only(domain)
+        skip_http_methods = is_selenium_only
+
+        if is_selenium_only:
+            logger.info(
+                f"🔒 Domain {domain} marked as selenium_only "
+                f"(protection: {protection_type}) - skipping HTTP methods"
+            )
+
         # Initialize result structure
         result: Dict[str, Any] = {
             "url": url,
@@ -1347,8 +1507,8 @@ class ContentExtractor:
 
         html_for_methods = html
 
-        # Try mcmetadata first if enabled
-        if self.use_mcmetadata and MCMETADATA_AVAILABLE:
+        # Try mcmetadata first if enabled (skip for selenium_only domains)
+        if self.use_mcmetadata and MCMETADATA_AVAILABLE and not skip_http_methods:
             try:
                 logger.info(f"Attempting mcmetadata extraction for {url}")
                 if metrics:
@@ -1382,7 +1542,13 @@ class ContentExtractor:
         missing_fields = self._get_missing_fields(result)
 
         # Try newspaper4k if mcmetadata is disabled or gaps remain
-        if NEWSPAPER_AVAILABLE and (not self.use_mcmetadata or missing_fields):
+        # Skip for selenium_only domains - HTTP requests will fail
+        use_newspaper = (
+            NEWSPAPER_AVAILABLE
+            and (not self.use_mcmetadata or missing_fields)
+            and not skip_http_methods
+        )
+        if use_newspaper:
             try:
                 logger.info(f"Attempting newspaper4k extraction for {url}")
                 if metrics:
@@ -1450,7 +1616,9 @@ class ContentExtractor:
         missing_fields = self._get_missing_fields(result)
 
         # Try BeautifulSoup fallback for missing fields
-        if missing_fields:
+        # For selenium_only domains without pre-fetched HTML, skip to Selenium
+        has_html_for_bs = html_for_methods or (result.get("metadata", {}).get("html"))
+        if missing_fields and (has_html_for_bs or not skip_http_methods):
             try:
                 logger.info(
                     f"Attempting BeautifulSoup fallback for missing "
@@ -1878,7 +2046,15 @@ class ContentExtractor:
         html: Optional[str] = None,
         include_other_metadata: Optional[bool] = None,
     ) -> Dict[str, Any]:
-        """Extract content using MediaCloud's mcmetadata pipeline."""
+        """Extract content using MediaCloud's mcmetadata pipeline.
+
+        mcmetadata now includes structured data extraction (JSON-LD, meta tags)
+        as the first step, which provides:
+        - article_title (from JSON-LD headline or og:title)
+        - article_author (from JSON-LD author or meta author)
+        - publication_date (from JSON-LD datePublished or article:published_time)
+        - wire_signals (from distributor tags, canonical URLs, etc.)
+        """
 
         if not MCMETADATA_AVAILABLE:
             raise RuntimeError("mcmetadata library is not installed")
@@ -1899,7 +2075,33 @@ class ContentExtractor:
         )
 
         raw_html_snapshot = mc_result.pop("raw_html", None)
+
+        # mcmetadata now handles wire detection via structured_data module
+        # but we still call our additional detection for Hearst and other patterns
         self._update_wire_hints_from_html(raw_html_snapshot, url)
+
+        # Merge wire signals from mcmetadata if present
+        mc_wire_signals = mc_result.get("wire_signals")
+        if mc_wire_signals and mc_wire_signals.get("detection_methods"):
+            if self._latest_wire_hints:
+                # Merge with existing hints
+                existing_methods = self._latest_wire_hints.get("detected_by", [])
+                existing_services = self._latest_wire_hints.get("wire_services", [])
+                for method in mc_wire_signals.get("detection_methods", []):
+                    if method not in existing_methods:
+                        existing_methods.append(method)
+                for service in mc_wire_signals.get("services", []):
+                    if service not in existing_services:
+                        existing_services.append(service)
+                self._latest_wire_hints["detected_by"] = existing_methods
+                self._latest_wire_hints["wire_services"] = existing_services
+            else:
+                self._latest_wire_hints = {
+                    "detected_by": mc_wire_signals.get("detection_methods", []),
+                    "wire_services": mc_wire_signals.get("services", []),
+                    "raw_source_name": mc_wire_signals.get("services", []),
+                    "evidence": mc_wire_signals.get("evidence", []),
+                }
 
         text_content = mc_result.get("text_content")
         if isinstance(text_content, bytes):
@@ -1909,26 +2111,26 @@ class ContentExtractor:
 
         article_title = mc_result.get("article_title")
 
-        authors_raw: Any = None
-        if include_other:
+        # Use article_author from mcmetadata (now populated from structured data)
+        author_value = mc_result.get("article_author")
+
+        # Fall back to 'other' authors if article_author not set
+        if not author_value and include_other:
             others = mc_result.get("other") or {}
             authors_raw = others.get("authors")
-        if not authors_raw:
-            authors_raw = mc_result.get("authors")
-
-        author_list: list[str] = []
-        if isinstance(authors_raw, (list, tuple, set)):
-            for item in authors_raw:
-                if isinstance(item, str):
-                    cleaned = item.strip()
+            if authors_raw:
+                author_list: list[str] = []
+                if isinstance(authors_raw, (list, tuple, set)):
+                    for item in authors_raw:
+                        if isinstance(item, str):
+                            cleaned = item.strip()
+                            if cleaned:
+                                author_list.append(cleaned)
+                elif isinstance(authors_raw, str):
+                    cleaned = authors_raw.strip()
                     if cleaned:
                         author_list.append(cleaned)
-        elif isinstance(authors_raw, str):
-            cleaned = authors_raw.strip()
-            if cleaned:
-                author_list.append(cleaned)
-
-        author_value = "; ".join(author_list) if author_list else None
+                author_value = "; ".join(author_list) if author_list else None
 
         publish_date = mc_result.get("publication_date")
         if isinstance(publish_date, datetime):
@@ -1938,9 +2140,15 @@ class ContentExtractor:
         else:
             publish_date_value = None
 
+        # Track extraction methods
+        title_method = mc_result.get("title_extraction_method", "mcmetadata")
+        author_method = mc_result.get("author_extraction_method")
+
         metadata_payload: Dict[str, Any] = {
             "extraction_method": "mcmetadata",
             "text_extraction_method": mc_result.get("text_extraction_method"),
+            "title_extraction_method": title_method,
+            "author_extraction_method": author_method,
         }
 
         mcmetadata_info = {
@@ -2054,11 +2262,13 @@ class ContentExtractor:
                             f"{protection_type}) by {domain}"
                         )
 
+                        # If JS-required protection, mark domain as selenium_only
+                        # so future extractions skip HTTP entirely
+                        if self._is_js_required_protection(protection_type):
+                            self._mark_domain_selenium_only(domain, protection_type)
+
                         # Record bot detection event
-                        is_captcha = (
-                            "cloudflare" in protection_type
-                            or "bot_protection" in protection_type
-                        )
+                        is_captcha = self._is_js_required_protection(protection_type)
                         event_type = (
                             "captcha_detected" if is_captcha else "403_forbidden"
                         )
@@ -2071,7 +2281,7 @@ class ContentExtractor:
                         )
 
                         # Use CAPTCHA backoff for confirmed bot protection
-                        if protection_type in ["cloudflare", "bot_protection"]:
+                        if self._is_js_required_protection(protection_type):
                             self._handle_captcha_backoff(domain)
                         else:
                             self._handle_rate_limit_error(domain, response)
@@ -2649,6 +2859,11 @@ class ContentExtractor:
             if self._detect_captcha_or_challenge(driver):
                 logger.warning(f"CAPTCHA or bot challenge detected on {url}")
 
+                # Try to bypass the challenge (click buttons, wait for JS)
+                if self._try_bypass_challenge(driver, url):
+                    logger.info(f"Successfully bypassed challenge on {url}")
+                    return True
+
                 # Try closing modals in case CAPTCHA is in a modal
                 if self._try_close_modals(driver, url):
                     logger.info("Successfully closed CAPTCHA modal")
@@ -2835,6 +3050,161 @@ class ContentExtractor:
 
         except Exception as e:
             logger.debug(f"Error in subscription wall detection: {e}")
+            return False
+
+    def _try_bypass_challenge(self, driver, url: str) -> bool:
+        """
+        Attempt to bypass JS-based bot challenges by waiting and clicking.
+
+        Many bot protection systems (Cloudflare, PerimeterX, Akamai) show a
+        "checking your browser" or "verifying" page that auto-resolves after
+        a few seconds of JavaScript execution. Some require clicking a button.
+
+        This method:
+        1. Waits for JavaScript-based challenges to auto-resolve
+        2. Looks for and clicks common verification buttons
+        3. Waits again to confirm bypass success
+
+        Returns True if the challenge appears to be bypassed.
+        """
+        try:
+            from selenium.webdriver.common.action_chains import ActionChains
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.support.ui import WebDriverWait
+        except ImportError:
+            return False
+
+        try:
+            logger.info(f"Attempting to bypass challenge on {url}")
+
+            # PHASE 1: Wait for auto-resolving challenges (like Cloudflare)
+            # Many JS challenges resolve automatically after fingerprinting
+            initial_wait = 5
+            logger.debug(f"Waiting {initial_wait}s for challenge to auto-resolve...")
+            time.sleep(initial_wait)
+
+            # Check if challenge resolved itself
+            if not self._detect_captcha_or_challenge(driver):
+                logger.info("Challenge auto-resolved after waiting")
+                return True
+
+            # PHASE 2: Look for clickable verification buttons
+            # Common button selectors for various bot protection systems
+            verification_selectors = [
+                # Cloudflare
+                "input[type='button'][value*='Verify']",
+                "button[type='submit']",
+                "#challenge-form button",
+                ".cf-turnstile-wrapper button",
+                "input[value='Verify you are human']",
+                # PerimeterX / Human Security
+                "#px-captcha",  # PerimeterX's press-and-hold button
+                "button[class*='human']",
+                "div[id*='px-captcha']",
+                # Generic verification buttons
+                "button:contains('Verify')",
+                "button:contains('Continue')",
+                "button:contains('I am human')",
+                "a[class*='verify']",
+                "input[value*='Continue']",
+                # Akamai Bot Manager
+                "#sec-overlay button",
+                ".akam-button",
+                # DataDome
+                "#datadome-modal button",
+                # Generic "I'm not a robot" style
+                ".g-recaptcha",  # May need to interact with reCAPTCHA iframe
+            ]
+
+            for selector in verification_selectors:
+                try:
+                    # Try CSS selector first
+                    elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            logger.info(f"Found verification element: {selector}")
+
+                            # Move to element with human-like behavior
+                            try:
+                                actions = ActionChains(driver)
+                                # Small random offset for human-like clicking
+                                import random
+
+                                offset_x = random.randint(-3, 3)
+                                offset_y = random.randint(-3, 3)
+                                actions.move_to_element_with_offset(
+                                    element, offset_x, offset_y
+                                )
+                                actions.pause(random.uniform(0.1, 0.3))
+                                actions.click()
+                                actions.perform()
+                                logger.info(f"Clicked verification element: {selector}")
+                            except Exception as click_err:
+                                # Fallback to direct click
+                                logger.debug(
+                                    f"ActionChains failed, trying direct click: {click_err}"
+                                )
+                                element.click()
+
+                            # Wait for the challenge to process our click
+                            time.sleep(3)
+
+                            # Check if we passed
+                            if not self._detect_captcha_or_challenge(driver):
+                                logger.info(
+                                    "Successfully bypassed challenge after clicking"
+                                )
+                                return True
+                            else:
+                                logger.debug(
+                                    "Challenge still present after clicking, trying next selector"
+                                )
+
+                except Exception as e:
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    continue
+
+            # PHASE 3: Handle PerimeterX press-and-hold challenges
+            # These require holding the button for a duration
+            try:
+                px_button = driver.find_element(By.ID, "px-captcha")
+                if px_button.is_displayed():
+                    logger.info("Detected PerimeterX press-and-hold challenge")
+                    actions = ActionChains(driver)
+                    actions.click_and_hold(px_button)
+                    # Hold for 8-12 seconds (PerimeterX requires ~10s)
+                    import random
+
+                    hold_time = random.uniform(8, 12)
+                    logger.debug(f"Holding button for {hold_time:.1f}s")
+                    actions.pause(hold_time)
+                    actions.release()
+                    actions.perform()
+
+                    time.sleep(3)  # Wait for verification
+
+                    if not self._detect_captcha_or_challenge(driver):
+                        logger.info(
+                            "Successfully bypassed PerimeterX press-and-hold challenge"
+                        )
+                        return True
+            except Exception:
+                pass  # No PerimeterX button found
+
+            # PHASE 4: Final wait - some challenges take longer
+            logger.debug("Final wait for slow-resolving challenges...")
+            time.sleep(5)
+
+            if not self._detect_captcha_or_challenge(driver):
+                logger.info("Challenge resolved after final wait")
+                return True
+
+            logger.warning(f"Could not bypass challenge on {url}")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error in challenge bypass attempt: {e}")
             return False
 
     def _detect_captcha_or_challenge(self, driver) -> bool:

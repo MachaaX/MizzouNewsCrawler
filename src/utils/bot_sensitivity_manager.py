@@ -535,3 +535,128 @@ class BotSensitivityManager:
             logger.error(f"Error fetching bot encounter stats: {e}")
 
         return {"total_events": 0}
+
+    def decay_sensitivity(
+        self,
+        days_without_detection: int = 7,
+        decay_amount: int = 1,
+        min_sensitivity: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Decay sensitivity for domains without recent bot detections.
+
+        This allows domains to recover over time if they stop triggering
+        bot detection. Should be called periodically (e.g., daily via cron).
+
+        Args:
+            days_without_detection: Days since last bot detection to trigger decay
+            decay_amount: Amount to reduce sensitivity by (default 1)
+            min_sensitivity: Minimum sensitivity to decay to (default 3)
+
+        Returns:
+            List of domains that were decayed with old/new sensitivity
+        """
+        decayed = []
+        try:
+            with self.db.get_session() as session:
+                # Find domains eligible for decay:
+                # - Have sensitivity > min_sensitivity
+                # - Haven't had bot detection in X days
+                # - Either never had detection or last one was X+ days ago
+                query = text(
+                    """
+                    SELECT s.id, s.host, s.bot_sensitivity, s.last_bot_detection_at
+                    FROM sources s
+                    WHERE s.bot_sensitivity > :min_sensitivity
+                    AND (
+                        s.last_bot_detection_at IS NULL
+                        OR s.last_bot_detection_at < NOW() - INTERVAL :days DAY
+                    )
+                    """
+                )
+                # PostgreSQL uses different interval syntax
+                pg_query = text(
+                    """
+                    SELECT s.id, s.host, s.bot_sensitivity, s.last_bot_detection_at
+                    FROM sources s
+                    WHERE s.bot_sensitivity > :min_sensitivity
+                    AND (
+                        s.last_bot_detection_at IS NULL
+                        OR s.last_bot_detection_at < NOW() - INTERVAL '%s days'
+                    )
+                    """
+                    % days_without_detection
+                )
+
+                # Try PostgreSQL syntax first, fall back to generic
+                try:
+                    result = safe_session_execute(
+                        session,
+                        pg_query,
+                        {"min_sensitivity": min_sensitivity},
+                    )
+                    rows = result.fetchall()
+                except Exception:
+                    result = safe_session_execute(
+                        session,
+                        query,
+                        {
+                            "min_sensitivity": min_sensitivity,
+                            "days": f"{days_without_detection} days",
+                        },
+                    )
+                    rows = result.fetchall()
+
+                for row in rows:
+                    source_id = row[0]
+                    host = row[1]
+                    old_sensitivity = row[2]
+                    new_sensitivity = max(
+                        min_sensitivity, old_sensitivity - decay_amount
+                    )
+
+                    if new_sensitivity < old_sensitivity:
+                        # Update sensitivity
+                        update_query = text(
+                            """
+                            UPDATE sources
+                            SET bot_sensitivity = :new_sensitivity,
+                                bot_sensitivity_updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :source_id
+                            """
+                        )
+                        safe_session_execute(
+                            session,
+                            update_query,
+                            {
+                                "new_sensitivity": new_sensitivity,
+                                "source_id": source_id,
+                            },
+                        )
+
+                        decayed.append(
+                            {
+                                "host": host,
+                                "old_sensitivity": old_sensitivity,
+                                "new_sensitivity": new_sensitivity,
+                                "last_detection": str(row[3]) if row[3] else None,
+                            }
+                        )
+
+                        logger.info(
+                            f"Decayed sensitivity for {host}: "
+                            f"{old_sensitivity} -> {new_sensitivity}"
+                        )
+
+                session.commit()
+
+                if decayed:
+                    logger.info(
+                        f"Sensitivity decay complete: {len(decayed)} domains decayed"
+                    )
+                else:
+                    logger.debug("Sensitivity decay: no domains eligible for decay")
+
+        except Exception as e:
+            logger.error(f"Error in sensitivity decay: {e}")
+
+        return decayed

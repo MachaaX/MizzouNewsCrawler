@@ -580,6 +580,15 @@ class Source(Base):
     last_bot_detection_at = Column(DateTime, index=True)
     bot_detection_metadata = Column(JSON)
 
+    # Bot protection detection - specific protection types require Selenium-only
+    # Values: 'perimeterx', 'cloudflare', 'datadome', 'akamai', 'incapsula', etc.
+    bot_protection_type = Column(String(64), nullable=True, index=True)
+    # When True, skip HTTP requests and use Selenium directly
+    selenium_only = Column(
+        Boolean, default=False, nullable=False, server_default=text("0")
+    )
+    bot_protection_detected_at = Column(DateTime, nullable=True)
+
     # Section discovery for enhanced news coverage
     # Stores discovered section URLs with performance metrics
     discovered_sections = Column(JSON, nullable=True)
