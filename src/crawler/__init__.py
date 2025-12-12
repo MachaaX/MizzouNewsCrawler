@@ -2694,6 +2694,52 @@ class ContentExtractor:
         except Exception as e:
             logger.debug(f"CDP UA override failed (non-fatal): {e}")
 
+        # Apply additional selenium-stealth for maximum anti-detection
+        # undetected-chromedriver handles basic stealth, but PerimeterX needs more
+        if SELENIUM_STEALTH_AVAILABLE:
+            try:
+                stealth(
+                    driver,
+                    languages=["en-US", "en"],
+                    vendor="Google Inc.",
+                    platform="Win32",
+                    webgl_vendor="Intel Inc.",
+                    renderer="Intel Iris OpenGL Engine",
+                    fix_hairline=True,
+                )
+                logger.debug("Applied selenium-stealth to undetected driver")
+            except Exception as e:
+                logger.debug(f"selenium-stealth application failed (non-fatal): {e}")
+
+        # Manual stealth enhancements for PerimeterX bypass
+        try:
+            driver.execute_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+            driver.execute_script(
+                """
+                // Override plugins to appear more legitimate
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+
+                // Override languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+
+                // Override permissions
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+                """
+            )
+        except Exception as e:
+            logger.debug(f"Manual stealth enhancements failed (non-fatal): {e}")
+
         # CRITICAL FIX: Set command executor timeout to prevent 147s delays
         # Default timeout is 120s, but Selenium waits an additional ~27s
         # somewhere, resulting in consistent 147s extractions. Setting to 30s
