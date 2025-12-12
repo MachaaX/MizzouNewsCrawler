@@ -192,8 +192,25 @@ class TestBotProtectionTypeDetection:
         assert protection == "incapsula"
 
 
+# Store original method for tests that need to test the real implementation
+_original_is_domain_selenium_only = ContentExtractor._is_domain_selenium_only
+
+
 class TestSeleniumOnlyDatabaseMethods:
     """Test _is_domain_selenium_only and _mark_domain_selenium_only methods."""
+
+    @pytest.fixture(autouse=True)
+    def restore_real_method(self, monkeypatch):
+        """Restore the real _is_domain_selenium_only method for these tests.
+        
+        The global autouse fixture mocks this method, but we need the real
+        implementation to test it.
+        """
+        monkeypatch.setattr(
+            ContentExtractor,
+            "_is_domain_selenium_only",
+            _original_is_domain_selenium_only,
+        )
 
     def test_is_domain_selenium_only_returns_false_by_default(self):
         """New domains should not be selenium_only by default."""
