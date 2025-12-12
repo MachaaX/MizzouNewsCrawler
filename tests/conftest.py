@@ -69,7 +69,7 @@ def cleanup_test_database():
 
 
 @pytest.fixture(autouse=True)
-def mock_extraction_method_lookup(monkeypatch):
+def mock_extraction_method_lookup(request, monkeypatch):
     """Mock _get_domain_extraction_method to prevent DB calls in tests.
 
     This autouse fixture prevents the ContentExtractor from making database
@@ -78,7 +78,14 @@ def mock_extraction_method_lookup(monkeypatch):
 
     Tests that specifically want to test special extraction methods should
     override this by providing their own mock.
+
+    This fixture does NOT apply to tests marked with @pytest.mark.integration,
+    as those tests need to exercise real database behavior.
     """
+    # Skip mocking for integration tests that need real DB behavior
+    if "integration" in request.keywords:
+        return
+
     from src.crawler import ContentExtractor
 
     monkeypatch.setattr(
