@@ -39,6 +39,7 @@ except ImportError:
 
 from src.crawler.origin_proxy import enable_origin_proxy  # noqa: E402
 from src.crawler.proxy_config import get_proxy_manager  # noqa: E402
+from src.crawler.utils import mask_proxy_url  # noqa: E402
 from src.models.database import DatabaseManager, safe_execute  # noqa: E402
 from src.models.verification import VerificationPattern  # noqa: E402
 from src.utils.telemetry import (  # noqa: E402
@@ -204,7 +205,7 @@ class URLVerificationService:
                 )
                 self.logger.info(
                     "🔐 Verification using origin proxy adapter (%s)",
-                    proxy_base,
+                    mask_proxy_url(proxy_base),
                 )
             except Exception as exc:
                 self.logger.warning(

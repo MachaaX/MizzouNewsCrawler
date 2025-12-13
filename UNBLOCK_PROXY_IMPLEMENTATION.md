@@ -63,6 +63,15 @@ Added to `k8s/argo/base-pipeline-workflow.yaml`:
     secretKeyRef:
       name: decodo-unblock-credentials
       key: password
+
+### Runtime Behavior
+
+- `UNBLOCK_PREFER_API_POST` (optional): When set to true (default), the processor will
+  prefer Decodo's API POST mode for `unblock` extraction. This ensures the Decodo
+  service sees the `X-SU-*` headers (session, locale, headless) needed to render
+  headless HTML for strongly protected pages (PerimeterX, DataDome, Akamai).
+  If set to false, the processor will attempt a GET via Decodo's proxy URL first
+  and fall back to the API POST on failure.
 ```
 
 #### Secret Management

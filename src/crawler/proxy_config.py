@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from src.crawler.utils import mask_proxy_url
+
 # Suppress InsecureRequestWarning for proxy connections (expected behavior)
 try:
     from urllib3.exceptions import InsecureRequestWarning
@@ -380,7 +382,7 @@ class ProxyManager:
         return {
             provider.value: {
                 "enabled": config.enabled,
-                "url": config.url or "N/A",
+                "url": mask_proxy_url(config.url) or "N/A",
                 "health": config.health_status,
                 "success_rate": f"{config.success_rate:.1f}%",
                 "requests": config.success_count + config.failure_count,

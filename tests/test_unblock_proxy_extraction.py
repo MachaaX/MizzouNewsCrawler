@@ -58,6 +58,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.crawler import ContentExtractor
+from src.crawler.utils import mask_proxy_url
 from src.models import Source
 from src.utils.comprehensive_telemetry import ExtractionMetrics
 
@@ -261,9 +262,10 @@ class TestExtractionFlowRouting:
         assert hasattr(extractor, "_extract_with_unblock_proxy")
         assert callable(extractor._extract_with_unblock_proxy)
 
-    def test_unblock_proxy_uses_correct_headers(self, mock_env_vars):
+    def test_unblock_proxy_uses_correct_headers(self, mock_env_vars, monkeypatch):
         """Should send Decodo-specific headers (X-SU-*)."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -283,9 +285,11 @@ class TestExtractionFlowRouting:
             assert "X-SU-Headless" in headers
             assert headers["X-SU-Headless"] == "html"
 
-    def test_unblock_proxy_uses_proxy_url(self, mock_env_vars):
+    def test_unblock_proxy_uses_proxy_url(self, mock_env_vars, monkeypatch):
         """Should route request through proxy."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -300,9 +304,11 @@ class TestExtractionFlowRouting:
             proxies = call_kwargs["proxies"]
             assert "http" in proxies or "https" in proxies
 
-    def test_unblock_proxy_disables_ssl_verification(self, mock_env_vars):
+    def test_unblock_proxy_disables_ssl_verification(self, mock_env_vars, monkeypatch):
         """Should disable SSL verification (verify=False)."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -314,9 +320,11 @@ class TestExtractionFlowRouting:
             call_kwargs = mock_get.call_args[1]
             assert call_kwargs["verify"] is False
 
-    def test_unblock_proxy_sets_timeout(self, mock_env_vars):
+    def test_unblock_proxy_sets_timeout(self, mock_env_vars, monkeypatch):
         """Should set a timeout for the request."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -329,9 +337,12 @@ class TestExtractionFlowRouting:
             assert "timeout" in call_kwargs
             assert call_kwargs["timeout"] > 0
 
-    def test_unblock_proxy_metadata_includes_extraction_method(self, mock_env_vars):
+    def test_unblock_proxy_metadata_includes_extraction_method(
+        self, mock_env_vars, monkeypatch
+    ):
         """Result metadata should indicate unblock_proxy extraction."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -352,9 +363,10 @@ class TestExtractionFlowRouting:
 class TestUnblockProxyMethod:
     """Test _extract_with_unblock_proxy() method behavior."""
 
-    def test_successful_extraction_with_full_html(self, mock_env_vars):
+    def test_successful_extraction_with_full_html(self, mock_env_vars, monkeypatch):
         """Should successfully extract from full HTML response."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -387,9 +399,10 @@ class TestUnblockProxyMethod:
         assert result["metadata"]["proxy_used"] is True
         assert result["metadata"]["page_source_length"] > 5000
 
-    def test_blocked_response_returns_empty(self, mock_env_vars):
+    def test_blocked_response_returns_empty(self, mock_env_vars, monkeypatch):
         """Should return empty dict if still blocked by bot protection."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 403
@@ -405,9 +418,10 @@ class TestUnblockProxyMethod:
 
         assert result == {}
 
-    def test_small_response_returns_empty(self, mock_env_vars):
+    def test_small_response_returns_empty(self, mock_env_vars, monkeypatch):
         """Should return empty dict if response is too small (< 5000 bytes)."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -418,14 +432,45 @@ class TestUnblockProxyMethod:
 
         assert result == {}
 
-    def test_network_error_returns_empty(self, mock_env_vars):
+    def test_network_error_returns_empty(self, mock_env_vars, monkeypatch):
         """Should return empty dict on network errors."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         with patch("requests.get", side_effect=Exception("Connection timeout")):
             result = extractor._extract_with_unblock_proxy("https://test.com/article")
 
         assert result == {}
+
+    def test_unblock_proxy_prefers_api_post(self, mock_env_vars, monkeypatch):
+        """When UNBLOCK_PREFER_API_POST is true, prefer POST to API as primary attempt."""
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
+        extractor = ContentExtractor()
+
+        # GET would return a small/blocked response
+        mock_get = Mock()
+        mock_get.status_code = 200
+        mock_get.text = "<html><body>small</body></html>"
+
+        # POST returns large HTML and should be used
+        mock_post = Mock()
+        mock_post.status_code = 200
+        mock_post.text = (
+            "<html><head><title>OK</title></head><body>"
+            + ("x" * 6000)
+            + "</body></html>"
+        )
+
+        with patch("requests.get", return_value=mock_get) as mock_get_fn:
+            with patch("requests.post", return_value=mock_post) as mock_post_fn:
+                result = extractor._extract_with_unblock_proxy(
+                    "https://test.com/article"
+                )
+
+                # Verify API POST was used as primary successful method
+                assert result.get("metadata", {}).get("proxy_provider") == "unblock_api"
+                assert mock_post_fn.called
+                assert not mock_get_fn.call_count or mock_get_fn.call_count == 0
 
     def test_uses_environment_variables(self, monkeypatch):
         """Should read proxy configuration from environment variables."""
@@ -433,6 +478,7 @@ class TestUnblockProxyMethod:
         monkeypatch.setenv("UNBLOCK_PROXY_USER", "customuser")
         monkeypatch.setenv("UNBLOCK_PROXY_PASS", "custompass")
 
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
         extractor = ContentExtractor()
 
         mock_response = Mock()
@@ -448,9 +494,10 @@ class TestUnblockProxyMethod:
             assert "customuser:custompass" in call_kwargs["proxies"]["https"]
             assert "custom.proxy.com:8080" in call_kwargs["proxies"]["https"]
 
-    def test_sends_required_headers(self, mock_env_vars):
+    def test_sends_required_headers(self, mock_env_vars, monkeypatch):
         """Should send X-SU-* headers required by Decodo API."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -472,9 +519,12 @@ class TestUnblockProxyMethod:
 class TestFieldLevelExtractionAndFallbacks:
     """Test field-level extraction behavior and fallback scenarios."""
 
-    def test_unblock_proxy_parses_html_with_beautifulsoup(self, mock_env_vars):
+    def test_unblock_proxy_parses_html_with_beautifulsoup(
+        self, mock_env_vars, monkeypatch
+    ):
         """Should parse HTML response with BeautifulSoup."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -507,10 +557,11 @@ class TestFieldLevelExtractionAndFallbacks:
             )
 
     def test_rotating_decodo_fallback_used_when_unblock_returns_small(
-        self, mock_env_vars
+        self, mock_env_vars, monkeypatch
     ):
         """When UNBLOCK GET returns small HTML, try rotating decodo proxy and succeed."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         # First response: small HTML (blocked)
         mock_small = Mock()
@@ -548,11 +599,15 @@ class TestFieldLevelExtractionAndFallbacks:
             assert "isp.decodo.com" in result.get("metadata", {}).get("proxy_host")
             assert result.get("metadata", {}).get("proxy_url") is not None
             assert metrics.proxy_url == result.get("metadata", {}).get("proxy_url")
+            assert result.get("metadata", {}).get("proxy_url") == mask_proxy_url(
+                "https://user-sp8:pass@isp.decodo.com:10001"
+            )
             assert metrics.proxy_authenticated is True
 
-    def test_post_api_fallback_used_when_gets_fail(self, mock_env_vars):
+    def test_post_api_fallback_used_when_gets_fail(self, mock_env_vars, monkeypatch):
         """When UNBLOCK GET and rotating proxies fail, attempt Decodo API POST."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         # First GET: small (blocked)
         mock_small = Mock()
@@ -608,9 +663,10 @@ class TestFieldLevelExtractionAndFallbacks:
                     post_call_kwargs["headers"]["X-SU-Session-Id"] == "mizzou-crawler"
                 )
 
-    def test_unblock_proxy_extracts_metadata(self, mock_env_vars):
+    def test_unblock_proxy_extracts_metadata(self, mock_env_vars, monkeypatch):
         """Should extract metadata fields from HTML."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -641,9 +697,12 @@ class TestFieldLevelExtractionAndFallbacks:
             assert result["metadata"]["proxy_used"] is True
             assert result["metadata"]["http_status"] == 200
 
-    def test_unblock_proxy_includes_extracted_at_timestamp(self, mock_env_vars):
+    def test_unblock_proxy_includes_extracted_at_timestamp(
+        self, mock_env_vars, monkeypatch
+    ):
         """Should include extracted_at timestamp in ISO format."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -667,9 +726,10 @@ class TestFieldLevelExtractionAndFallbacks:
 class TestEdgeCases:
     """Test edge cases and error conditions."""
 
-    def test_large_html_response_handled(self, mock_env_vars):
+    def test_large_html_response_handled(self, mock_env_vars, monkeypatch):
         """Should handle very large HTML responses without crashing."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         # 2MB HTML response
         large_html = "<html><body>" + ("x" * 2_000_000) + "</body></html>"
@@ -683,9 +743,10 @@ class TestEdgeCases:
             # Should process without error
             assert result["metadata"]["page_source_length"] == len(large_html)
 
-    def test_malformed_html_handled_gracefully(self, mock_env_vars):
+    def test_malformed_html_handled_gracefully(self, mock_env_vars, monkeypatch):
         """Should handle malformed HTML without crashing."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         malformed_html = (
             """
@@ -708,9 +769,10 @@ class TestEdgeCases:
             # BeautifulSoup should still parse it
             assert isinstance(result, dict)
 
-    def test_timeout_handled_gracefully(self, mock_env_vars):
+    def test_timeout_handled_gracefully(self, mock_env_vars, monkeypatch):
         """Should handle request timeouts gracefully."""
         extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         with patch("requests.get", side_effect=Exception("Timeout")):
             result = extractor._extract_with_unblock_proxy("https://test.com/article")
@@ -724,6 +786,7 @@ class TestEdgeCases:
         monkeypatch.delenv("UNBLOCK_PROXY_USER", raising=False)
         monkeypatch.delenv("UNBLOCK_PROXY_PASS", raising=False)
 
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
         extractor = ContentExtractor()
 
         mock_response = Mock()
