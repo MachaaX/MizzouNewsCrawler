@@ -4,6 +4,7 @@ This module is a thin wrapper around the extraction logic implemented in
 `src.cli.commands.extraction` that allows extracting a single URL from the
 command line as a top-level command.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -11,7 +12,9 @@ import argparse
 from .extraction import handle_extract_url_command
 
 
-def add_extract_url_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+def add_extract_url_parser(
+    subparsers: argparse._SubParsersAction,
+) -> argparse.ArgumentParser:
     parser = subparsers.add_parser(
         "extract-url", help="Extract content for a single URL and save to DB"
     )

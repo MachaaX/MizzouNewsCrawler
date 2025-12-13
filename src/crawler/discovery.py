@@ -68,6 +68,7 @@ try:
 except Exception:
     _parse_date = None  # type: ignore[assignment]
 
+from src.crawler.utils import mask_proxy_url
 from src.utils.discovery_outcomes import DiscoveryResult
 from src.utils.telemetry import (
     DiscoveryMethod,
@@ -80,7 +81,6 @@ from src.utils.url_utils import normalize_url
 
 from ..models.database import DatabaseManager, safe_execute, safe_session_execute
 from .origin_proxy import enable_origin_proxy
-from src.crawler.utils import mask_proxy_url
 from .proxy_config import get_proxy_manager
 
 logger = logging.getLogger(__name__)

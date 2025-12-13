@@ -172,7 +172,9 @@ class TestArgoWorkflowImageConfiguration:
                     == "decodo-unblock-credentials"
                 ), f"{step_name} UNBLOCK_PROXY_PASS must reference 'decodo-unblock-credentials' secret"
             # Ensure flow prefers API POST for Decodo unblock by default
-            pref_post_var = next((e for e in env_vars if e["name"] == "UNBLOCK_PREFER_API_POST"), None)
+            pref_post_var = next(
+                (e for e in env_vars if e["name"] == "UNBLOCK_PREFER_API_POST"), None
+            )
             assert (
                 pref_post_var is not None and pref_post_var.get("value") == "true"
             ), f"{step_name} UNBLOCK_PREFER_API_POST should be 'true'"

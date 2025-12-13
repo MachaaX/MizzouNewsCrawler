@@ -2673,6 +2673,7 @@ class ContentExtractor:
 
             # Helper to mask proxy host for metadata/logging (avoid leaking creds)
             from urllib.parse import urlparse
+
             def _host_from_proxy(proxy: str) -> str:
                 try:
                     parsed = urlparse(proxy)
@@ -2683,7 +2684,9 @@ class ContentExtractor:
             # Primary request logic: prefer POST for Decodo API when configured
             # Rationale: Decodo requires X-SU-* headers which the API POST receives
             # directly; proxy GET via CONNECT may hide the header from the proxy.
-            prefer_api_post = os.getenv("UNBLOCK_PREFER_API_POST", "true").strip().lower() in (
+            prefer_api_post = os.getenv(
+                "UNBLOCK_PREFER_API_POST", "true"
+            ).strip().lower() in (
                 "1",
                 "true",
                 "yes",
@@ -2726,7 +2729,9 @@ class ContentExtractor:
                     used_proxy_provider = "unblock_api"
                 else:
                     if prefer_api_post:
-                        logger.debug("Using Decodo API POST mode for primary GET-less attempt")
+                        logger.debug(
+                            "Using Decodo API POST mode for primary GET-less attempt"
+                        )
                         # Primary POST attempt (API mode) - no browser_actions
                         response = requests.post(
                             api_url,
@@ -3123,7 +3128,9 @@ class ContentExtractor:
                     f"Configured proxy extension for {proxy_host}:{proxy_port}"
                 )
             else:
-                logger.warning(f"Could not parse proxy URL: {mask_proxy_url(selenium_proxy)}")
+                logger.warning(
+                    f"Could not parse proxy URL: {mask_proxy_url(selenium_proxy)}"
+                )
 
         # Read optional binary paths from environment
         # Common envs: CHROME_BIN, GOOGLE_CHROME_BIN, CHROMEDRIVER_PATH

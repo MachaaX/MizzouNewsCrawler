@@ -337,7 +337,9 @@ class TestExtractionFlowRouting:
             assert "timeout" in call_kwargs
             assert call_kwargs["timeout"] > 0
 
-    def test_unblock_proxy_metadata_includes_extraction_method(self, mock_env_vars, monkeypatch):
+    def test_unblock_proxy_metadata_includes_extraction_method(
+        self, mock_env_vars, monkeypatch
+    ):
         """Result metadata should indicate unblock_proxy extraction."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
@@ -453,11 +455,17 @@ class TestUnblockProxyMethod:
         # POST returns large HTML and should be used
         mock_post = Mock()
         mock_post.status_code = 200
-        mock_post.text = "<html><head><title>OK</title></head><body>" + ("x" * 6000) + "</body></html>"
+        mock_post.text = (
+            "<html><head><title>OK</title></head><body>"
+            + ("x" * 6000)
+            + "</body></html>"
+        )
 
         with patch("requests.get", return_value=mock_get) as mock_get_fn:
             with patch("requests.post", return_value=mock_post) as mock_post_fn:
-                result = extractor._extract_with_unblock_proxy("https://test.com/article")
+                result = extractor._extract_with_unblock_proxy(
+                    "https://test.com/article"
+                )
 
                 # Verify API POST was used as primary successful method
                 assert result.get("metadata", {}).get("proxy_provider") == "unblock_api"
@@ -511,7 +519,9 @@ class TestUnblockProxyMethod:
 class TestFieldLevelExtractionAndFallbacks:
     """Test field-level extraction behavior and fallback scenarios."""
 
-    def test_unblock_proxy_parses_html_with_beautifulsoup(self, mock_env_vars, monkeypatch):
+    def test_unblock_proxy_parses_html_with_beautifulsoup(
+        self, mock_env_vars, monkeypatch
+    ):
         """Should parse HTML response with BeautifulSoup."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
@@ -589,9 +599,8 @@ class TestFieldLevelExtractionAndFallbacks:
             assert "isp.decodo.com" in result.get("metadata", {}).get("proxy_host")
             assert result.get("metadata", {}).get("proxy_url") is not None
             assert metrics.proxy_url == result.get("metadata", {}).get("proxy_url")
-            assert (
-                result.get("metadata", {}).get("proxy_url")
-                == mask_proxy_url("https://user-sp8:pass@isp.decodo.com:10001")
+            assert result.get("metadata", {}).get("proxy_url") == mask_proxy_url(
+                "https://user-sp8:pass@isp.decodo.com:10001"
             )
             assert metrics.proxy_authenticated is True
 
@@ -688,7 +697,9 @@ class TestFieldLevelExtractionAndFallbacks:
             assert result["metadata"]["proxy_used"] is True
             assert result["metadata"]["http_status"] == 200
 
-    def test_unblock_proxy_includes_extracted_at_timestamp(self, mock_env_vars, monkeypatch):
+    def test_unblock_proxy_includes_extracted_at_timestamp(
+        self, mock_env_vars, monkeypatch
+    ):
         """Should include extracted_at timestamp in ISO format."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")

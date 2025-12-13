@@ -1,5 +1,7 @@
 import os
+
 import requests
+
 from src.crawler.origin_proxy import enable_origin_proxy
 from src.crawler.utils import mask_proxy_url
 
@@ -19,7 +21,9 @@ def test_enable_origin_proxy_masks_response_proxy_url(monkeypatch):
     enable_origin_proxy(session)
 
     # Replace original request with a dummy that returns DummyResponse
-    session._origin_original_request = lambda method, url, *args, **kwargs: DummyResponse()
+    session._origin_original_request = (
+        lambda method, url, *args, **kwargs: DummyResponse()
+    )
 
     resp = session.get("https://example.com/test")
 

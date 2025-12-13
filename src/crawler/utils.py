@@ -4,6 +4,7 @@ These helpers are designed to provide safe, consistent formatting for
 proxy URLs when logging or writing them to telemetry. They intentionally
 avoid exposing credentials in logs.
 """
+
 from __future__ import annotations
 
 from urllib.parse import urlparse

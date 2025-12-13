@@ -4,6 +4,7 @@ import os
 from types import MethodType
 from typing import Any
 from urllib.parse import quote_plus, urlparse
+
 from src.crawler.utils import mask_proxy_url
 
 logger = logging.getLogger(__name__)

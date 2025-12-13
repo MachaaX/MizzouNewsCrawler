@@ -500,9 +500,6 @@ def add_extraction_parser(subparsers):
     extract_parser.set_defaults(func=handle_extraction_command)
 
 
-
-
-
 def handle_extraction_command(args) -> int:
     """Execute extraction command logic."""
     _ensure_crawler_dependencies()
@@ -995,19 +992,28 @@ def handle_extract_url_command(args) -> int:
 
             # Update candidate_link status to reflect extraction outcome
             safe_session_execute(
-                session, CANDIDATE_STATUS_UPDATE_SQL, {"status": article_status, "id": str(candidate.id)}
+                session,
+                CANDIDATE_STATUS_UPDATE_SQL,
+                {"status": article_status, "id": str(candidate.id)},
             )
 
             # Optionally verify insert
             if getattr(args, "verify_insert", False):
                 row = safe_session_execute(
-                    session, text("SELECT id, url FROM articles WHERE id = :id"), {"id": article_id}
+                    session,
+                    text("SELECT id, url FROM articles WHERE id = :id"),
+                    {"id": article_id},
                 ).fetchone()
                 if not row:
-                    logger.warning("Inserted article not found via verification select: %s", article_id)
+                    logger.warning(
+                        "Inserted article not found via verification select: %s",
+                        article_id,
+                    )
 
             session.commit()
-            print(f"✅ Article extracted & saved: {article_id} (status={article_status})")
+            print(
+                f"✅ Article extracted & saved: {article_id} (status={article_status})"
+            )
         except Exception as insert_error:
             logger.exception("Failed to insert article for %s: %s", url, insert_error)
             session.rollback()
