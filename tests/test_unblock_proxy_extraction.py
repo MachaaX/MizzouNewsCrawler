@@ -697,9 +697,7 @@ class TestPostgreSQLIntegration:
     def test_get_domain_extraction_method_queries_database(self, cloud_sql_session):
         """Test _get_domain_extraction_method actually queries PostgreSQL."""
         import os
-
-        print(f"DEBUG: DATABASE_URL={os.environ.get('DATABASE_URL')}")
-        print(f"DEBUG: TEST_DATABASE_URL={os.environ.get('TEST_DATABASE_URL')}")
+        from unittest.mock import patch
 
         # Insert test domain with unblock method
         cloud_sql_session.execute(
@@ -714,25 +712,35 @@ class TestPostgreSQLIntegration:
         """
             )
         )
-        cloud_sql_session.commit()
+        # No need to commit if we share the session, but flushing is good practice
+        cloud_sql_session.flush()
 
-        extractor = ContentExtractor()
-        # Clear cache to force database lookup
-        if hasattr(extractor, "_extraction_method_cache"):
-            extractor._extraction_method_cache = {}
+        # Patch DatabaseManager to use the same session as the test
+        # This is necessary because the test fixture uses a transaction that isn't committed to the DB,
+        # so a separate connection (which DatabaseManager would create) cannot see the data.
+        with patch("src.models.database.DatabaseManager") as MockDBManager:
+            mock_db_instance = MockDBManager.return_value
+            mock_db_instance.get_session.return_value.__enter__.return_value = cloud_sql_session
 
-        method, protection = extractor._get_domain_extraction_method(
-            "integration-test.com"
-        )
+            extractor = ContentExtractor()
+            # Clear cache to force database lookup
+            if hasattr(extractor, "_extraction_method_cache"):
+                extractor._extraction_method_cache = {}
 
-        assert method == "unblock", "Should retrieve 'unblock' from database"
-        assert (
-            protection == "perimeterx"
-        ), "Should retrieve protection type from database"
+            method, protection = extractor._get_domain_extraction_method(
+                "integration-test.com"
+            )
+
+            assert method == "unblock", "Should retrieve 'unblock' from database"
+            assert (
+                protection == "perimeterx"
+            ), "Should retrieve protection type from database"
 
     @pytest.mark.integration
     def test_mark_domain_special_extraction_updates_database(self, cloud_sql_session):
         """Test _mark_domain_special_extraction actually updates PostgreSQL."""
+        from unittest.mock import patch
+
         # Insert test domain with http method
         cloud_sql_session.execute(
             text(
@@ -744,26 +752,30 @@ class TestPostgreSQLIntegration:
         """
             )
         )
-        cloud_sql_session.commit()
+        cloud_sql_session.flush()
 
-        extractor = ContentExtractor()
-        extractor._mark_domain_special_extraction("mark-test.com", "perimeterx")
+        with patch("src.models.database.DatabaseManager") as MockDBManager:
+            mock_db_instance = MockDBManager.return_value
+            mock_db_instance.get_session.return_value.__enter__.return_value = cloud_sql_session
 
-        # Verify database was updated
-        result = cloud_sql_session.execute(
-            text(
-                """
-            SELECT extraction_method, bot_protection_type, selenium_only
-            FROM sources
-            WHERE host = 'mark-test.com'
-        """
-            )
-        ).fetchone()
+            extractor = ContentExtractor()
+            extractor._mark_domain_special_extraction("mark-test.com", "perimeterx")
 
-        assert result is not None
-        assert (
-            result[0] == "unblock"
-        ), "extraction_method should be updated to 'unblock'"
+            # Verify database was updated
+            result = cloud_sql_session.execute(
+                text(
+                    """
+                SELECT extraction_method, bot_protection_type, selenium_only
+                FROM sources
+                WHERE host = 'mark-test.com'
+            """
+                )
+            ).fetchone()
+
+            assert result is not None
+            assert (
+                result[0] == "unblock"
+            ), "extraction_method should be updated to 'unblock'"
         assert result[1] == "perimeterx", "bot_protection_type should be set"
         assert result[2] is False, "selenium_only should be False for unblock method"
 
@@ -799,6 +811,8 @@ class TestPostgreSQLIntegration:
     @pytest.mark.integration
     def test_extraction_method_cache_persists_across_lookups(self, cloud_sql_session):
         """Test that cache prevents redundant database queries."""
+        from unittest.mock import patch
+
         # Insert test domain
         cloud_sql_session.execute(
             text(
@@ -812,30 +826,38 @@ class TestPostgreSQLIntegration:
         """
             )
         )
-        cloud_sql_session.commit()
+        cloud_sql_session.flush()
 
-        extractor = ContentExtractor()
-        # Clear cache
-        if hasattr(extractor, "_extraction_method_cache"):
-            extractor._extraction_method_cache = {}
+        with patch("src.models.database.DatabaseManager") as MockDBManager:
+            mock_db_instance = MockDBManager.return_value
+            mock_db_instance.get_session.return_value.__enter__.return_value = cloud_sql_session
 
-        # First lookup - hits database
-        method1, protection1 = extractor._get_domain_extraction_method("cache-test.com")
+            extractor = ContentExtractor()
+            # Clear cache
+            if hasattr(extractor, "_extraction_method_cache"):
+                extractor._extraction_method_cache = {}
 
-        # Second lookup - should use cache
-        method2, protection2 = extractor._get_domain_extraction_method("cache-test.com")
+            # First lookup - hits database
+            method1, protection1 = extractor._get_domain_extraction_method(
+                "cache-test.com"
+            )
 
-        assert method1 == method2 == "selenium"
-        assert protection1 == protection2 == "cloudflare"
+            # Second lookup - should use cache
+            method2, protection2 = extractor._get_domain_extraction_method(
+                "cache-test.com"
+            )
 
-        # Verify cache was populated
-        cache_key = "extraction_method:cache-test.com"
-        assert hasattr(extractor, "_extraction_method_cache")
-        assert cache_key in extractor._extraction_method_cache
-        assert extractor._extraction_method_cache[cache_key] == (
-            "selenium",
-            "cloudflare",
-        )
+            assert method1 == method2 == "selenium"
+            assert protection1 == protection2 == "cloudflare"
+
+            # Verify cache was populated
+            cache_key = "extraction_method:cache-test.com"
+            assert hasattr(extractor, "_extraction_method_cache")
+            assert cache_key in extractor._extraction_method_cache
+            assert extractor._extraction_method_cache[cache_key] == (
+                "selenium",
+                "cloudflare",
+            )
 
     @pytest.mark.integration
     def test_migration_updated_perimeterx_domains_to_unblock(self, cloud_sql_session):

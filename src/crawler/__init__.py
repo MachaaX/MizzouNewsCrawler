@@ -1325,7 +1325,6 @@ class ContentExtractor:
             logger.error(
                 f"Failed to check extraction method for {domain}: {e}", exc_info=True
             )
-            print(f"DEBUG: Failed to check extraction method for {domain}: {e}")
             return ("http", None)
 
     def _handle_captcha_backoff(self, domain: str) -> None:
