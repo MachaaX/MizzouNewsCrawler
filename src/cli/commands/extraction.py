@@ -911,7 +911,12 @@ def handle_extract_url_command(args) -> int:
         content_cleaner = BalancedBoundaryContentCleaner(enable_telemetry=False)
 
         article_id = str(uuid.uuid4())
-        publisher = candidate.source or candidate.source_name or parsed.netloc
+        # Normalize publisher to a plain string for metrics and avoid SQLAlchemy types
+        publisher = (
+            str(candidate.source)
+            if candidate.source
+            else (str(candidate.source_name) if candidate.source_name else parsed.netloc)
+        )
         operation_id = f"ext_url_{article_id}"
         metrics = ExtractionMetrics(operation_id, article_id, url, publisher)
 
@@ -926,8 +931,10 @@ def handle_extract_url_command(args) -> int:
         raw_author = content.get("author")
         cleaned_author = None
         if raw_author:
+            # Ensure source_name is a plain string for BylineCleaner
+            source_name_arg = str(candidate.source) if candidate.source else None
             byline_result = byline_cleaner.clean_byline(
-                raw_author, return_json=True, source_name=candidate.source
+                raw_author, return_json=True, source_name=source_name_arg
             )
             cleaned_author = _format_cleaned_authors(byline_result.get("authors", []))
 
