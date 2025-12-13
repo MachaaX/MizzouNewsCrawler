@@ -8,7 +8,9 @@ def test_scripts_sql_include_wire_check_status():
     This prevents premature export/backfills that include 'labeled' articles before wire checks complete.
     """
     root = Path("scripts")
-    pattern_text = re.compile(r"(?:text|sql_text)\s*\(\s*([\"']{3})(.*?)(\1)\s*\)", re.DOTALL | re.IGNORECASE)
+    pattern_text = re.compile(
+        r"(?:text|sql_text)\s*\(\s*([\"']{3})(.*?)(\1)\s*\)", re.DOTALL | re.IGNORECASE
+    )
     pattern_status = re.compile(r"status\s*=\s*['\"]labeled['\"]", re.IGNORECASE)
     pattern_wire = re.compile(r"wire_check_status", re.IGNORECASE)
 
@@ -31,6 +33,10 @@ def test_scripts_sql_include_wire_check_status():
             if "status" not in sql or "labeled" not in sql or "where" not in sql:
                 continue
             if pattern_status.search(sql) and not pattern_wire.search(sql):
-                issues.append((path, sql.strip()[:240].replace("\n", " ")))  # show a snippet
+                issues.append(
+                    (path, sql.strip()[:240].replace("\n", " "))
+                )  # show a snippet
 
-    assert not issues, f"Found SQL queries selecting labeled articles without wire_check_status: {issues}"
+    assert (
+        not issues
+    ), f"Found SQL queries selecting labeled articles without wire_check_status: {issues}"

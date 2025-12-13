@@ -138,25 +138,37 @@ class TestArgoWorkflowImageConfiguration:
             template = next(t for t in templates if t.get("name") == step_name)
             env_vars = template["container"].get("env", [])
 
-            decodo_secret_var = next((e for e in env_vars if e["name"] == "DECODO_SECRET_NAME"), None)
-            assert decodo_secret_var is not None, f"{step_name} missing DECODO_SECRET_NAME"
-            assert decodo_secret_var.get("value") == "decodo-proxy-creds", (
-                f"{step_name} DECODO_SECRET_NAME should be 'decodo-proxy-creds'"
+            decodo_secret_var = next(
+                (e for e in env_vars if e["name"] == "DECODO_SECRET_NAME"), None
             )
+            assert (
+                decodo_secret_var is not None
+            ), f"{step_name} missing DECODO_SECRET_NAME"
+            assert (
+                decodo_secret_var.get("value") == "decodo-proxy-creds"
+            ), f"{step_name} DECODO_SECRET_NAME should be 'decodo-proxy-creds'"
 
             # Only the extraction step requires unblock proxy creds
             if step_name == "extraction-step":
-                unblock_user_var = next((e for e in env_vars if e["name"] == "UNBLOCK_PROXY_USER"), None)
-                unblock_pass_var = next((e for e in env_vars if e["name"] == "UNBLOCK_PROXY_PASS"), None)
-                assert unblock_user_var is not None and unblock_pass_var is not None, (
-                    f"{step_name} missing UNBLOCK_PROXY_USER or UNBLOCK_PROXY_PASS env var"
+                unblock_user_var = next(
+                    (e for e in env_vars if e["name"] == "UNBLOCK_PROXY_USER"), None
+                )
+                unblock_pass_var = next(
+                    (e for e in env_vars if e["name"] == "UNBLOCK_PROXY_PASS"), None
                 )
                 assert (
-                    unblock_user_var.get("valueFrom", {}).get("secretKeyRef", {}).get("name")
+                    unblock_user_var is not None and unblock_pass_var is not None
+                ), f"{step_name} missing UNBLOCK_PROXY_USER or UNBLOCK_PROXY_PASS env var"
+                assert (
+                    unblock_user_var.get("valueFrom", {})
+                    .get("secretKeyRef", {})
+                    .get("name")
                     == "decodo-unblock-credentials"
                 ), f"{step_name} UNBLOCK_PROXY_USER must reference 'decodo-unblock-credentials' secret"
                 assert (
-                    unblock_pass_var.get("valueFrom", {}).get("secretKeyRef", {}).get("name")
+                    unblock_pass_var.get("valueFrom", {})
+                    .get("secretKeyRef", {})
+                    .get("name")
                     == "decodo-unblock-credentials"
                 ), f"{step_name} UNBLOCK_PROXY_PASS must reference 'decodo-unblock-credentials' secret"
 
@@ -209,20 +221,35 @@ class TestKubernetesDeploymentConfiguration:
                 "Processor deployment uses decodo proxy but missing "
                 "DECODO_SECRET_NAME"
             )
-            decodo_secret_var = next((e for e in env_vars if e["name"] == "DECODO_SECRET_NAME"), None)
-            assert decodo_secret_var is not None and decodo_secret_var.get("value") == "decodo-proxy-creds", (
-                "Processor DECODO_SECRET_NAME must be 'decodo-proxy-creds'"
+            decodo_secret_var = next(
+                (e for e in env_vars if e["name"] == "DECODO_SECRET_NAME"), None
             )
+            assert (
+                decodo_secret_var is not None
+                and decodo_secret_var.get("value") == "decodo-proxy-creds"
+            ), "Processor DECODO_SECRET_NAME must be 'decodo-proxy-creds'"
 
             # Verify that UNBLOCK_PROXY_* env vars reference decodo-unblock-credentials in k8s deployment
-            unblock_user = next((e for e in env_vars if e["name"] == "UNBLOCK_PROXY_USER"), None)
-            unblock_pass = next((e for e in env_vars if e["name"] == "UNBLOCK_PROXY_PASS"), None)
-            assert unblock_user is not None and unblock_user.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == "decodo-unblock-credentials", (
-                "Processor UNBLOCK_PROXY_USER must reference 'decodo-unblock-credentials' secret"
+            unblock_user = next(
+                (e for e in env_vars if e["name"] == "UNBLOCK_PROXY_USER"), None
             )
-            assert unblock_pass is not None and unblock_pass.get("valueFrom", {}).get("secretKeyRef", {}).get("name") == "decodo-unblock-credentials", (
-                "Processor UNBLOCK_PROXY_PASS must reference 'decodo-unblock-credentials' secret"
+            unblock_pass = next(
+                (e for e in env_vars if e["name"] == "UNBLOCK_PROXY_PASS"), None
             )
+            assert (
+                unblock_user is not None
+                and unblock_user.get("valueFrom", {})
+                .get("secretKeyRef", {})
+                .get("name")
+                == "decodo-unblock-credentials"
+            ), "Processor UNBLOCK_PROXY_USER must reference 'decodo-unblock-credentials' secret"
+            assert (
+                unblock_pass is not None
+                and unblock_pass.get("valueFrom", {})
+                .get("secretKeyRef", {})
+                .get("name")
+                == "decodo-unblock-credentials"
+            ), "Processor UNBLOCK_PROXY_PASS must reference 'decodo-unblock-credentials' secret"
             assert "GOOGLE_CLOUD_PROJECT" in env_var_names, (
                 "Processor deployment uses decodo proxy but missing "
                 "GOOGLE_CLOUD_PROJECT"

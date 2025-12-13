@@ -725,7 +725,9 @@ class ContentExtractor:
 
         # Warn if unblock proxy credentials are missing in production style deployments
         if self.proxy_manager.active_provider.value == "decodo":
-            if not os.getenv("UNBLOCK_PROXY_USER") or not os.getenv("UNBLOCK_PROXY_PASS"):
+            if not os.getenv("UNBLOCK_PROXY_USER") or not os.getenv(
+                "UNBLOCK_PROXY_PASS"
+            ):
                 logger.warning(
                     "No UNBLOCK proxy credentials present in environment while PROXY_PROVIDER=decodo; "
                     "if strong bot-protected domains are present the unblock proxy may be required."
@@ -2613,7 +2615,10 @@ class ContentExtractor:
         return result
 
     def _extract_with_unblock_proxy(
-        self, url: str, browser_actions: Optional[list] = None, metrics: Optional[ExtractionMetrics] = None
+        self,
+        url: str,
+        browser_actions: Optional[list] = None,
+        metrics: Optional[ExtractionMetrics] = None,
     ) -> Dict[str, Any]:
         """Extract content using Decodo unblock proxy API for strong bot protection.
 
@@ -2703,9 +2708,11 @@ class ContentExtractor:
                     # Consider 'success' only when 200 and reasonable HTML length
                     used_proxy_status_str = (
                         "success"
-                        if response and response.status_code == 200
+                        if response
+                        and response.status_code == 200
                         and len(response.text or "") >= 5000
-                        and "Access to this page has been denied" not in (response.text or "")
+                        and "Access to this page has been denied"
+                        not in (response.text or "")
                         else "failed"
                     )
                     used_proxy_provider = "unblock_api"
@@ -2722,13 +2729,17 @@ class ContentExtractor:
                     used_proxy_authenticated = bool(proxy_user and proxy_pass)
                     used_proxy_status_str = (
                         "success"
-                        if response and response.status_code == 200
+                        if response
+                        and response.status_code == 200
                         and len(response.text or "") >= 5000
-                        and "Access to this page has been denied" not in (response.text or "")
+                        and "Access to this page has been denied"
+                        not in (response.text or "")
                         else "failed"
                     )
                     used_proxy_provider = "unblock_proxy"
-            except Exception as e:  # pragma: no cover - network errors exercised in test
+            except (
+                Exception
+            ) as e:  # pragma: no cover - network errors exercised in test
                 logger.warning(f"Decodo primary request failed for {url}: {e}")
                 response = None
 
@@ -2771,7 +2782,8 @@ class ContentExtractor:
                                 if (
                                     proxied_response.status_code == 200
                                     and len(proxied_html) >= 5000
-                                    and "Access to this page has been denied" not in proxied_html
+                                    and "Access to this page has been denied"
+                                    not in proxied_html
                                 ):
                                     response = proxied_response
                                     html = proxied_html
@@ -2779,7 +2791,9 @@ class ContentExtractor:
                                     used_proxy_host = _host_from_proxy(
                                         proxies.get("https") or proxies.get("http")
                                     )
-                                    used_proxy_url = proxies.get("https") or proxies.get("http")
+                                    used_proxy_url = proxies.get(
+                                        "https"
+                                    ) or proxies.get("http")
                                     used_proxy_authenticated = True
                                     used_proxy_status_str = "success"
                                     used_proxy_provider = "decodo_rotating"
@@ -2807,7 +2821,8 @@ class ContentExtractor:
                             if (
                                 post_response.status_code == 200
                                 and len(post_response.text) >= 5000
-                                and "Access to this page has been denied" not in post_response.text
+                                and "Access to this page has been denied"
+                                not in post_response.text
                             ):
                                 response = post_response
                                 html = post_response.text
@@ -2821,7 +2836,9 @@ class ContentExtractor:
                                     f"Decodo API POST fallback succeeded for {url} (len={html_len})"
                                 )
                         except Exception as e:  # pragma: no cover
-                            logger.debug(f"Decodo API POST fallback failed for {url}: {e}")
+                            logger.debug(
+                                f"Decodo API POST fallback failed for {url}: {e}"
+                            )
 
                 except Exception as e:
                     logger.debug(f"Unblock fallback attempts failed for {url}: {e}")
@@ -2835,7 +2852,9 @@ class ContentExtractor:
                             proxy_url=used_proxy_url,
                             proxy_authenticated=bool(used_proxy_authenticated),
                             proxy_status=used_proxy_status_str,
-                            proxy_error=(None if response is None else "small_response"),
+                            proxy_error=(
+                                None if response is None else "small_response"
+                            ),
                         )
                     return {}
 
@@ -2873,7 +2892,9 @@ class ContentExtractor:
                 metrics.set_proxy_metrics(
                     proxy_used=bool(result["metadata"].get("proxy_used")),
                     proxy_url=result["metadata"].get("proxy_url"),
-                    proxy_authenticated=result["metadata"].get("proxy_authenticated", False),
+                    proxy_authenticated=result["metadata"].get(
+                        "proxy_authenticated", False
+                    ),
                     proxy_status=result["metadata"].get("proxy_status"),
                     proxy_error=None,
                 )

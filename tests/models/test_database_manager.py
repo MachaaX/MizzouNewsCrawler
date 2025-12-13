@@ -847,7 +847,6 @@ def test_save_article_classification_creates_and_updates():
 
         manager.close()
 
-
     def test_save_article_classification_sets_status_for_cleaned_and_local():
         with temporary_database() as (db_url, _):
             manager = DatabaseManager(database_url=db_url)
@@ -871,7 +870,9 @@ def test_save_article_classification_creates_and_updates():
                 autocommit=True,
             )
 
-            stored = manager.session.query(Article).filter_by(id="article-status-1").one()
+            stored = (
+                manager.session.query(Article).filter_by(id="article-status-1").one()
+            )
             assert str(stored.status) == "labeled"
             # Provide a counterexample: 'wire' should not be overwritten by labeling
             article2 = Article(
@@ -893,7 +894,9 @@ def test_save_article_classification_creates_and_updates():
                 autocommit=True,
             )
 
-            stored2 = manager.session.query(Article).filter_by(id="article-status-2").one()
+            stored2 = (
+                manager.session.query(Article).filter_by(id="article-status-2").one()
+            )
             assert str(stored2.status) == "wire"
 
             manager.close()
