@@ -915,7 +915,9 @@ def handle_extract_url_command(args) -> int:
         publisher = (
             str(candidate.source)
             if candidate.source
-            else (str(candidate.source_name) if candidate.source_name else parsed.netloc)
+            else (
+                str(candidate.source_name) if candidate.source_name else parsed.netloc
+            )
         )
         operation_id = f"ext_url_{article_id}"
         metrics = ExtractionMetrics(operation_id, article_id, url, publisher)
