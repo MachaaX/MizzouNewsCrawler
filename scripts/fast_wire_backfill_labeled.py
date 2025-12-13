@@ -111,7 +111,7 @@ def main():
         total_count = session.execute(text("""
             SELECT COUNT(*) 
             FROM articles 
-            WHERE status = 'labeled'
+            WHERE status = 'labeled' AND wire_check_status = 'complete'
             AND text IS NOT NULL
             AND text != ''
         """)).scalar()
@@ -134,7 +134,7 @@ def main():
                     cl.source
                 FROM articles a
                 LEFT JOIN candidate_links cl ON a.candidate_link_id = cl.id
-                WHERE a.status = 'labeled'
+                WHERE a.status = 'labeled' AND a.wire_check_status = 'complete'
                 AND a.text IS NOT NULL
                 AND a.text != ''
                 ORDER BY a.id

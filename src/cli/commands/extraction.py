@@ -1255,7 +1255,7 @@ def _process_batch(
                     # Tracked in DB but excluded from ML/BigQuery:
                     # - entity_extraction.py: skips paywall/wire/error
                     # - analysis.py: EXCLUDED_STATUSES includes paywall
-                    # - BigQuery: only exports status='labeled'
+                    # - BigQuery: only exports status='labeled' AND wire_check_status='complete'
                     # Uses database boilerplate patterns to strip noise
                     MIN_CONTENT_LENGTH = 150
                     cleaning_metadata = {}

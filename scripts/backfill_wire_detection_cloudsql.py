@@ -89,7 +89,7 @@ def get_candidates_for_backfill(session, limit: int = None) -> list[tuple]:
             a.content,
             a.author
         FROM articles a
-        WHERE a.status = 'labeled'
+        WHERE a.status = 'labeled' AND a.wire_check_status = 'complete'
         AND a.content IS NOT NULL
         AND a.content != ''
         ORDER BY a.publish_date DESC

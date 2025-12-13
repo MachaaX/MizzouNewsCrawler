@@ -723,6 +723,14 @@ class ContentExtractor:
             f"{self.proxy_manager.active_provider.value}"
         )
 
+        # Warn if unblock proxy credentials are missing in production style deployments
+        if self.proxy_manager.active_provider.value == "decodo":
+            if not os.getenv("UNBLOCK_PROXY_USER") or not os.getenv("UNBLOCK_PROXY_PASS"):
+                logger.warning(
+                    "No UNBLOCK proxy credentials present in environment while PROXY_PROVIDER=decodo; "
+                    "if strong bot-protected domains are present the unblock proxy may be required."
+                )
+
         # Set initial user agent
         self.current_user_agent = user_agent or random.choice(self.user_agent_pool)
 
@@ -1686,7 +1694,7 @@ class ContentExtractor:
                 if metrics:
                     metrics.start_method("unblock_proxy")
 
-                unblock_result = self._extract_with_unblock_proxy(url)
+                unblock_result = self._extract_with_unblock_proxy(url, None, metrics)
 
                 if unblock_result and unblock_result.get("content"):
                     self._merge_extraction_results(
@@ -2604,7 +2612,9 @@ class ContentExtractor:
 
         return result
 
-    def _extract_with_unblock_proxy(self, url: str) -> Dict[str, Any]:
+    def _extract_with_unblock_proxy(
+        self, url: str, browser_actions: Optional[list] = None, metrics: Optional[ExtractionMetrics] = None
+    ) -> Dict[str, Any]:
         """Extract content using Decodo unblock proxy API for strong bot protection.
 
         Uses Decodo's headless browser API with special headers to bypass
@@ -2625,10 +2635,17 @@ class ContentExtractor:
             proxy_url_env = os.getenv(
                 "UNBLOCK_PROXY_URL", "https://unblock.decodo.com:60000"
             )
-            proxy_user = os.getenv("UNBLOCK_PROXY_USER", "U0000332559")
-            proxy_pass = os.getenv(
-                "UNBLOCK_PROXY_PASS", "PW_1b20cd078bbfbf554faa89e9af56f7ea8"
-            )
+            proxy_user = os.getenv("UNBLOCK_PROXY_USER")
+            proxy_pass = os.getenv("UNBLOCK_PROXY_PASS")
+
+            # Warn if UNBLOCK credentials are not set; fallback will attempt
+            # rotating DECODO proxies or API POST if configured. This avoids
+            # silent use of hardcoded fallback credentials.
+            if not proxy_user or not proxy_pass:
+                logger.warning(
+                    "UNBLOCK_PROXY_USER/PASS not set - UNBLOCK proxy credentials missing; "
+                    "will fall back to rotating DECODO proxies or POST API if configured"
+                )
 
             # Build authenticated proxy URL
             if "://" in proxy_url_env:
@@ -2648,25 +2665,179 @@ class ContentExtractor:
 
             logger.info(f"Fetching {url} via Decodo unblock proxy")
 
-            response = requests.get(
-                url,
-                headers=headers,
-                proxies={"http": proxy_url, "https": proxy_url},
-                verify=False,
-                timeout=30,
-            )
+            # Helper to mask proxy host for metadata/logging (avoid leaking creds)
+            from urllib.parse import urlparse
 
-            html = response.text
+            def _host_from_proxy(proxy: str) -> str:
+                try:
+                    parsed = urlparse(proxy)
+                    return parsed.hostname or str(parsed.netloc)
+                except Exception:
+                    return proxy
+
+            # Primary request logic: prefer POST when browser_actions provided (API mode)
+            response = None
+            used_proxy_host = None
+            used_proxy_provider = None
+            used_proxy_url = None
+            used_proxy_authenticated = False
+            used_proxy_status_str = None
+
+            try:
+                if browser_actions:
+                    # Use Decodo headless API in POST mode - include browser actions
+                    # auth tuple preferred over proxies for API interactions
+                    logger.debug("Using Decodo API POST mode for browser_actions")
+                    api_url = proxy_url_env
+                    response = requests.post(
+                        api_url,
+                        json={"url": url, "browser_actions": browser_actions},
+                        headers=headers,
+                        auth=(proxy_user, proxy_pass),
+                        verify=False,
+                        timeout=30,
+                    )
+                    used_proxy_host = urlparse(api_url).hostname
+                    used_proxy_url = api_url
+                    used_proxy_authenticated = True
+                    # Consider 'success' only when 200 and reasonable HTML length
+                    used_proxy_status_str = (
+                        "success"
+                        if response and response.status_code == 200
+                        and len(response.text or "") >= 5000
+                        and "Access to this page has been denied" not in (response.text or "")
+                        else "failed"
+                    )
+                    used_proxy_provider = "unblock_api"
+                else:
+                    response = requests.get(
+                        url,
+                        headers=headers,
+                        proxies={"http": proxy_url, "https": proxy_url},
+                        verify=False,
+                        timeout=30,
+                    )
+                    used_proxy_host = _host_from_proxy(proxy_url)
+                    used_proxy_url = proxy_url
+                    used_proxy_authenticated = bool(proxy_user and proxy_pass)
+                    used_proxy_status_str = (
+                        "success"
+                        if response and response.status_code == 200
+                        and len(response.text or "") >= 5000
+                        and "Access to this page has been denied" not in (response.text or "")
+                        else "failed"
+                    )
+                    used_proxy_provider = "unblock_proxy"
+            except Exception as e:  # pragma: no cover - network errors exercised in test
+                logger.warning(f"Decodo primary request failed for {url}: {e}")
+                response = None
+
+            html = response.text if response is not None else ""
             html_len = len(html)
 
-            logger.info(f"Unblock proxy returned {html_len} bytes for {url}")
+            logger.info(
+                f"Unblock proxy returned {html_len} bytes for {url} (provider: {used_proxy_provider}, host: {used_proxy_host}, url: {used_proxy_url})"
+            )
 
             # Check if still blocked
-            if "Access to this page has been denied" in html or html_len < 5000:
+            if (
+                response is None
+                or "Access to this page has been denied" in html
+                or html_len < 5000
+            ):
                 logger.warning(
-                    f"Unblock proxy may be blocked for {url} ({html_len} bytes)"
+                    f"Unblock proxy may be blocked or returned small HTML for {url} ({html_len} bytes); attempting fallbacks"
                 )
-                return {}
+
+                # Fallback 1: Try rotating DECODO provider via ProxyManager (proxy manager may be configured to DECODO)
+                try:
+                    proxies = None
+                    pm = getattr(self, "proxy_manager", None)
+                    if pm is not None:
+                        proxies = pm.get_requests_proxies()
+                        if proxies:
+                            logger.info(
+                                f"Attempting rotating Decodo GET fallback for {url} using proxies: {list(proxies.keys())}"
+                            )
+                            try:
+                                proxied_response = requests.get(
+                                    url,
+                                    headers=headers,
+                                    proxies=proxies,
+                                    verify=False,
+                                    timeout=30,
+                                )
+                                proxied_html = proxied_response.text
+                                if (
+                                    proxied_response.status_code == 200
+                                    and len(proxied_html) >= 5000
+                                    and "Access to this page has been denied" not in proxied_html
+                                ):
+                                    response = proxied_response
+                                    html = proxied_html
+                                    html_len = len(html)
+                                    used_proxy_host = _host_from_proxy(
+                                        proxies.get("https") or proxies.get("http")
+                                    )
+                                    used_proxy_url = proxies.get("https") or proxies.get("http")
+                                    used_proxy_authenticated = True
+                                    used_proxy_status_str = "success"
+                                    used_proxy_provider = "decodo_rotating"
+                                    logger.info(
+                                        f"Rotating Decodo fallback succeeded for {url} (len={html_len})"
+                                    )
+                            except Exception as e:  # pragma: no cover - best-effort
+                                logger.debug(
+                                    f"Rotating Decodo fallback failed for {url}: {e}"
+                                )
+
+                    # Fallback 2: Try Decodo API POST (even without browser_actions), using auth
+                    if response is None or len(html) < 5000:
+                        logger.info(f"Attempting Decodo API POST fallback for {url}")
+                        try:
+                            api_url = proxy_url_env
+                            post_response = requests.post(
+                                api_url,
+                                json={"url": url},
+                                headers=headers,
+                                auth=(proxy_user, proxy_pass),
+                                verify=False,
+                                timeout=30,
+                            )
+                            if (
+                                post_response.status_code == 200
+                                and len(post_response.text) >= 5000
+                                and "Access to this page has been denied" not in post_response.text
+                            ):
+                                response = post_response
+                                html = post_response.text
+                                html_len = len(html)
+                                used_proxy_host = urlparse(api_url).hostname
+                                used_proxy_url = api_url
+                                used_proxy_authenticated = True
+                                used_proxy_status_str = "success"
+                                used_proxy_provider = "unblock_api_post"
+                                logger.info(
+                                    f"Decodo API POST fallback succeeded for {url} (len={html_len})"
+                                )
+                        except Exception as e:  # pragma: no cover
+                            logger.debug(f"Decodo API POST fallback failed for {url}: {e}")
+
+                except Exception as e:
+                    logger.debug(f"Unblock fallback attempts failed for {url}: {e}")
+
+                # After fallbacks, if nothing succeeded, return empty -> trigger Selenium fallback in caller
+                if response is None or len(html) < 5000:
+                    # Update telemetry metrics to capture failed proxy usage
+                    if metrics:
+                        metrics.set_proxy_metrics(
+                            proxy_used=bool(used_proxy_provider),
+                            proxy_url=used_proxy_url,
+                            proxy_authenticated=bool(used_proxy_authenticated),
+                            proxy_status=used_proxy_status_str,
+                            proxy_error=(None if response is None else "small_response"),
+                        )
+                    return {}
 
             # Update wire hints from HTML
             self._update_wire_hints_from_html(html, url)
@@ -2684,6 +2855,11 @@ class ContentExtractor:
                     "meta_description": self._extract_meta_description(soup),
                     "extraction_method": "unblock_proxy",
                     "proxy_used": True,
+                    "proxy_host": used_proxy_host,
+                    "proxy_provider": used_proxy_provider,
+                    "proxy_url": used_proxy_url,
+                    "proxy_authenticated": bool(used_proxy_authenticated),
+                    "proxy_status": used_proxy_status_str,
                     "page_source_length": html_len,
                     "http_status": response.status_code,
                 },
@@ -2691,6 +2867,16 @@ class ContentExtractor:
             }
 
             self._attach_publish_date_fallback_metadata(result)
+
+            # Record proxy metrics into ExtractionMetrics if provided
+            if metrics:
+                metrics.set_proxy_metrics(
+                    proxy_used=bool(result["metadata"].get("proxy_used")),
+                    proxy_url=result["metadata"].get("proxy_url"),
+                    proxy_authenticated=result["metadata"].get("proxy_authenticated", False),
+                    proxy_status=result["metadata"].get("proxy_status"),
+                    proxy_error=None,
+                )
 
             logger.info(f"✅ Unblock proxy extraction succeeded for {url}")
             return result

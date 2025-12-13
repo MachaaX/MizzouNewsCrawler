@@ -58,6 +58,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.crawler import ContentExtractor
+from src.utils.comprehensive_telemetry import ExtractionMetrics
 from src.models import Source
 
 
@@ -504,6 +505,83 @@ class TestFieldLevelExtractionAndFallbacks:
             assert (
                 result.get("metadata", {}).get("extraction_method") == "unblock_proxy"
             )
+
+    def test_rotating_decodo_fallback_used_when_unblock_returns_small(self, mock_env_vars):
+        """When UNBLOCK GET returns small HTML, try rotating decodo proxy and succeed."""
+        extractor = ContentExtractor()
+
+        # First response: small HTML (blocked)
+        mock_small = Mock()
+        mock_small.status_code = 200
+        mock_small.text = "<html><body>small</body></html>"
+
+        # Second response: large HTML (rotating decodo succeeds)
+        mock_big = Mock()
+        mock_big.status_code = 200
+        mock_big.text = (
+            "<html><head><title>Test Article</title></head><body>" + ("test " * 1000) + "</body></html>"
+        )
+
+        # Patch requests.get to return small then big (proxy fallback)
+        with patch("requests.get", side_effect=[mock_small, mock_big]) as mock_get:
+            # Provide a fake rotating proxy via proxy_manager
+            extractor.proxy_manager = Mock()
+            extractor.proxy_manager.get_requests_proxies.return_value = {
+                "https": "https://user-sp8:pass@isp.decodo.com:10001"
+            }
+
+            metrics = ExtractionMetrics("opid-1", "article-1", "https://test.com/article", "TestPub")
+            result = extractor._extract_with_unblock_proxy(
+                "https://test.com/article", None, metrics
+            )
+
+            assert result.get("metadata", {}).get("extraction_method") == "unblock_proxy"
+            assert result.get("metadata", {}).get("proxy_provider") == "decodo_rotating"
+            assert "isp.decodo.com" in result.get("metadata", {}).get("proxy_host")
+            assert result.get("metadata", {}).get("proxy_url") is not None
+            assert metrics.proxy_url == result.get("metadata", {}).get("proxy_url")
+            assert metrics.proxy_authenticated is True
+
+    def test_post_api_fallback_used_when_gets_fail(self, mock_env_vars):
+        """When UNBLOCK GET and rotating proxies fail, attempt Decodo API POST."""
+        extractor = ContentExtractor()
+
+        # First GET: small (blocked)
+        mock_small = Mock()
+        mock_small.status_code = 200
+        mock_small.text = "<html><body>small</body></html>"
+
+        # Second GET (rotating) also small (fail)
+        mock_small2 = Mock()
+        mock_small2.status_code = 200
+        mock_small2.text = "<html><body>small</body></html>"
+
+        # POST returns large HTML
+        mock_post = Mock()
+        mock_post.status_code = 200
+        mock_post.text = "<html><head><title>OK</title></head><body>" + ("x" * 5000) + "</body></html>"
+
+        # Patch sequences: requests.get (primary), requests.get(rotating), requests.post(fallback)
+        with patch("requests.get", side_effect=[mock_small, mock_small2]) as mock_get:
+            with patch("requests.post", return_value=mock_post) as mock_post_fn:
+                extractor.proxy_manager = Mock()
+                extractor.proxy_manager.get_requests_proxies.return_value = {
+                    "https": "https://user-sp8:pass@isp.decodo.com:10001"
+                }
+
+                metrics = ExtractionMetrics("opid-2", "article-2", "https://test.com/article", "TestPub")
+                result = extractor._extract_with_unblock_proxy(
+                    "https://test.com/article", None, metrics
+                )
+
+                assert result.get("metadata", {}).get("extraction_method") == "unblock_proxy"
+                assert result.get("metadata", {}).get("proxy_provider") == "unblock_api_post"
+                assert result.get("metadata", {}).get("proxy_url") == "https://unblock.decodo.com:60000"
+                assert metrics.proxy_url == result.get("metadata", {}).get("proxy_url")
+                # Verify Decodo API headers were sent on POST
+                assert mock_post_fn.call_count >= 1
+                post_call_kwargs = mock_post_fn.call_args[1]
+                assert post_call_kwargs["headers"]["X-SU-Session-Id"] == "mizzou-crawler"
 
     def test_unblock_proxy_extracts_metadata(self, mock_env_vars):
         """Should extract metadata fields from HTML."""

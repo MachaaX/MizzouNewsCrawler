@@ -109,9 +109,15 @@ H1: "Young mother shot in car; police search for suspect"
 ## Deployment Steps
 
 1. **Create secret** (one-time):
-   ```bash
-   ./scripts/create-unblock-secret.sh production
-   ```
+  Use `scripts/sync-decodo-credentials.sh` to synchronize credentials across GCP Secret Manager, GitHub, and Kubernetes. Example using environment variables (preferred):
+  ```bash
+  export UNBLOCK_PROXY_USER=U0000332559
+  export UNBLOCK_PROXY_PASS=PW_XXXX
+  export GOOGLE_CLOUD_PROJECT=mizzou-news-crawler
+
+  # Sync to GCP Secret Manager, GitHub repo secrets (LocalNewsImpact/MizzouNewsCrawler), and Kubernetes namespace (production)
+  ./scripts/sync-decodo-credentials.sh --gcp-project "$GOOGLE_CLOUD_PROJECT" --github-repo LocalNewsImpact/MizzouNewsCrawler production
+  ```
 
 2. **Deploy feature** (automated):
    ```bash

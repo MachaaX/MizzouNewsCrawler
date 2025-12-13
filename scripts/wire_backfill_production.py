@@ -36,7 +36,7 @@ with db.get_session() as session:
         SELECT COUNT(*)
         FROM articles a
         JOIN candidate_links cl ON a.candidate_link_id = cl.id
-        WHERE a.status = 'labeled'
+        WHERE a.status = 'labeled' AND a.wire_check_status = 'complete'
         AND a.text IS NOT NULL
         AND a.text != ''
     ''')).scalar()
@@ -58,7 +58,7 @@ with db.get_session() as session:
                 cl.source
             FROM articles a
             JOIN candidate_links cl ON a.candidate_link_id = cl.id
-            WHERE a.status = 'labeled'
+            WHERE a.status = 'labeled' AND a.wire_check_status = 'complete'
             AND a.text IS NOT NULL
             AND a.text != ''
             ORDER BY a.id
