@@ -11,6 +11,7 @@ from src.crawler.proxy_config import (
     get_proxy_status,
     switch_proxy,
 )
+from src.crawler.utils import mask_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ def handle_proxy_test(args) -> int:
     config = manager.get_active_config()
 
     print(f"Active Provider: {config.provider.value}")
-    print(f"Proxy URL: {config.url or 'N/A'}")
+    print(f"Proxy URL: {mask_proxy_url(config.url) or 'N/A'}")
     print()
 
     try:
@@ -247,7 +248,7 @@ def handle_proxy_list(args) -> int:
         print(f"[{enabled_marker}] {provider.value}")
         print(f"    Provider: {provider.name}")
         print(f"    Enabled: {config.enabled}")
-        print(f"    URL: {config.url or 'N/A'}")
+        print(f"    URL: {mask_proxy_url(config.url) or 'N/A'}")
 
         if config.username:
             print(f"    Username: {config.username}")

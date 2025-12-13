@@ -500,6 +500,9 @@ def add_extraction_parser(subparsers):
     extract_parser.set_defaults(func=handle_extraction_command)
 
 
+
+
+
 def handle_extraction_command(args) -> int:
     """Execute extraction command logic."""
     _ensure_crawler_dependencies()
@@ -849,6 +852,183 @@ def handle_extraction_command(args) -> int:
     finally:
         # Clean up persistent driver when job is complete
         extractor.close_persistent_driver()
+
+
+def handle_extract_url_command(args) -> int:
+    """Extract a single URL and persist the result to the database.
+
+    This mirrors the extraction flow used by the batch processor but focuses
+    on a single candidate URL for quick debugging and operational checks.
+    """
+    _ensure_crawler_dependencies()
+    if ContentExtractor is None:
+        raise RuntimeError("ContentExtractor dependency is unavailable")
+
+    url = getattr(args, "url", None)
+    if not url:
+        print("❌ Error: No URL provided")
+        return 1
+
+    # Basic URL sanity check
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        print("❌ Error: Invalid URL")
+        return 1
+
+    try:
+        db = DatabaseManager()
+    except Exception:
+        logger.exception("Failed to initialize database connection")
+        return 1
+
+    session = db.session
+    try:
+        # Find or create candidate link record
+        candidate = session.query(CandidateLink).filter_by(url=url).one_or_none()
+        if candidate is None:
+            candidate = CandidateLink(
+                url=url,
+                source=getattr(args, "source", parsed.netloc),
+                status="article",
+                discovered_by="extract-url",
+                dataset_id=getattr(args, "dataset", None),
+            )
+            session.add(candidate)
+            session.commit()
+            logger.info("Created candidate link for URL: %s", url)
+
+        # Prevent duplicate extraction if an article already exists for this link
+        existing = (
+            session.query(Article)
+            .filter(Article.candidate_link_id == candidate.id)
+            .first()
+        )
+        if existing:
+            print(f"⚠️  Article already exists for URL: {url} (id={existing.id})")
+            return 0
+
+        extractor = ContentExtractor()
+        byline_cleaner = BylineCleaner()
+        content_cleaner = BalancedBoundaryContentCleaner(enable_telemetry=False)
+        telemetry = ComprehensiveExtractionTelemetry()
+
+        article_id = str(uuid.uuid4())
+        publisher = candidate.source or candidate.source_name or parsed.netloc
+        operation_id = f"ext_url_{article_id}"
+        metrics = ExtractionMetrics(operation_id, article_id, url, publisher)
+
+        print(f"🔍 Extracting {url}... (candidate id: {candidate.id})")
+        content = extractor.extract_content(url, metrics=metrics)
+        if not content or not content.get("title"):
+            logger.warning("No content or title extracted for %s", url)
+            print("⚠️  No content extracted (title missing)")
+            return 1
+
+        # Run byline cleaning and wire hints detection (simplified)
+        raw_author = content.get("author")
+        cleaned_author = None
+        if raw_author:
+            byline_result = byline_cleaner.clean_byline(
+                raw_author, return_json=True, source_name=candidate.source
+            )
+            cleaned_author = _format_cleaned_authors(byline_result.get("authors", []))
+
+        # Basic wire detection via mcmetadata hints
+        metadata_value = content.get("metadata") or {}
+        wire_service_info = None
+        article_status = "extracted"
+        wire_hints = metadata_value.get("wire_hints")
+        if isinstance(wire_hints, dict):
+            hint_services = [svc for svc in wire_hints.get("wire_services", []) if svc]
+            if hint_services:
+                article_status = "wire"
+                wire_service_info = json.dumps(hint_services)
+
+        # Content cleaning and text hash calculation
+        domain = parsed.netloc
+        content_text = content.get("content") or content.get("text") or ""
+        if not content_text or len(content_text.strip()) == 0:
+            print("⚠️  Extracted content is empty")
+            return 1
+
+        # If necessary, run content cleaning to obtain text
+        try:
+            cleaned_text, cleaned_meta = content_cleaner.process_single_article(
+                content_text, domain, dry_run=False
+            )
+        except Exception:
+            cleaned_text = content_text
+            cleaned_meta = {}
+
+        text_hash = calculate_content_hash(cleaned_text)
+        now = datetime.utcnow()
+
+        # Insert article row
+        wire_check_status = _initial_wire_check_status(article_status)
+
+        try:
+            safe_session_execute(
+                session,
+                ARTICLE_INSERT_SQL,
+                {
+                    "id": article_id,
+                    "candidate_link_id": str(candidate.id),
+                    "url": url,
+                    "title": content.get("title"),
+                    "author": cleaned_author,
+                    "publish_date": content.get("publish_date"),
+                    "content": cleaned_text,
+                    "text": cleaned_text,
+                    "status": article_status,
+                    "metadata": json.dumps(metadata_value),
+                    "wire": wire_service_info,
+                    "wire_check_status": wire_check_status,
+                    "wire_check_attempted_at": None,
+                    "wire_check_error": None,
+                    "wire_check_metadata": None,
+                    "extracted_at": now.isoformat(),
+                    "created_at": now.isoformat(),
+                    "text_hash": text_hash,
+                },
+            )
+
+            # Update candidate_link status to reflect extraction outcome
+            safe_session_execute(
+                session, CANDIDATE_STATUS_UPDATE_SQL, {"status": article_status, "id": str(candidate.id)}
+            )
+
+            # Optionally verify insert
+            if getattr(args, "verify_insert", False):
+                row = safe_session_execute(
+                    session, text("SELECT id, url FROM articles WHERE id = :id"), {"id": article_id}
+                ).fetchone()
+                if not row:
+                    logger.warning("Inserted article not found via verification select: %s", article_id)
+
+            session.commit()
+            print(f"✅ Article extracted & saved: {article_id} (status={article_status})")
+        except Exception as insert_error:
+            logger.exception("Failed to insert article for %s: %s", url, insert_error)
+            session.rollback()
+            return 1
+
+        # Trigger post-extraction cleaning + entity extraction for the saved article
+        domains_for_cleaning = {domain: [article_id]}
+        _run_post_extraction_cleaning(domains_for_cleaning, db=session)
+
+        return 0
+    finally:
+        try:
+            extractor.close_persistent_driver()
+        except Exception:
+            pass
+
+
+# Note: `extract-url` command now lives in src/cli/commands/extract_url.py.
+# The handler function `handle_extract_url_command` is exported here for
+# convenience so other modules may import it directly.
 
 
 def _process_batch(

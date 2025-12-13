@@ -28,6 +28,7 @@ COMMAND_HANDLER_ATTRS: dict[str, str] = {
     "discovery-status": "handle_discovery_status_command",
     "extract": "handle_extraction_command",
     "extract-entities": "handle_entity_extraction_command",
+    "extract-url": "handle_extract_url_command",
     "clean-articles": "handle_cleaning_command",
     "cleanup-candidates": "handle_cleanup_candidates_command",
     "housekeeping": "handle_housekeeping_command",
@@ -86,6 +87,7 @@ def _load_command_parser(command: str) -> tuple[Callable, Callable] | None:
         "discovery-status": "discovery_status",
         "extract": "extraction",
         "extract-entities": "entity_extraction",
+        "extract-url": "extract_url",
         "clean-articles": "cleaning",
         "analyze": "analysis",
         "load-sources": "load_sources",
@@ -123,17 +125,26 @@ def _load_command_parser(command: str) -> tuple[Callable, Callable] | None:
         parser_func = None
         handler_func = None
 
-        # Try to find add_*_parser function
-        for attr in dir(module):
-            if attr.startswith("add_") and attr.endswith("_parser"):
-                parser_func = getattr(module, attr)
-                break
+        # Prefer the module-level function that matches the command name
+        preferred_add = f"add_{command.replace('-', '_')}_parser"
+        preferred_handle = f"handle_{command.replace('-', '_')}_command"
+        if hasattr(module, preferred_add):
+            parser_func = getattr(module, preferred_add)
+        else:
+            # Try to find add_*_parser function
+            for attr in dir(module):
+                if attr.startswith("add_") and attr.endswith("_parser"):
+                    parser_func = getattr(module, attr)
+                    break
 
-        # Try to find handle_*_command function
-        for attr in dir(module):
-            if attr.startswith("handle_") and attr.endswith("_command"):
-                handler_func = getattr(module, attr)
-                break
+        if hasattr(module, preferred_handle):
+            handler_func = getattr(module, preferred_handle)
+        else:
+            # Try to find handle_*_command function
+            for attr in dir(module):
+                if attr.startswith("handle_") and attr.endswith("_command"):
+                    handler_func = getattr(module, attr)
+                    break
 
         if parser_func and handler_func:
             return (parser_func, handler_func)

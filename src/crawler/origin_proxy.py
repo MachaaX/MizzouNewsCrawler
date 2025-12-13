@@ -4,6 +4,7 @@ import os
 from types import MethodType
 from typing import Any
 from urllib.parse import quote_plus, urlparse
+from src.crawler.utils import mask_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ def enable_origin_proxy(session):
                 parsed = urlparse(original_url)
                 domain = parsed.netloc
                 logger.info(
-                    f"🔀 Proxying {method} {domain} via {proxy_base} "
+                    f"🔀 Proxying {method} {domain} via {mask_proxy_url(proxy_base)} "
                     f"(auth: {'yes' if has_auth else 'NO - MISSING CREDENTIALS'})"
                 )
         else:
@@ -166,7 +167,7 @@ def enable_origin_proxy(session):
 
             # Attach proxy metadata to response for telemetry
             response._proxy_used = proxy_used
-            response._proxy_url = proxy_base if proxy_used else None
+            response._proxy_url = mask_proxy_url(proxy_base) if proxy_used else None
             response._proxy_authenticated = has_auth if proxy_used else False
             if proxy_used:
                 response._proxy_status = "success"

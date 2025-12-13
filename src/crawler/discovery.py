@@ -80,6 +80,7 @@ from src.utils.url_utils import normalize_url
 
 from ..models.database import DatabaseManager, safe_execute, safe_session_execute
 from .origin_proxy import enable_origin_proxy
+from src.crawler.utils import mask_proxy_url
 from .proxy_config import get_proxy_manager
 
 logger = logging.getLogger(__name__)
@@ -379,7 +380,7 @@ class NewsDiscovery:
                 )
                 logger.info(
                     "🔐 Discovery using origin proxy adapter (%s)",
-                    proxy_base,
+                    mask_proxy_url(proxy_base),
                 )
             except Exception as exc:
                 logger.warning(
@@ -419,7 +420,7 @@ class NewsDiscovery:
             logger.info(
                 "🔐 Discovery using legacy proxy pool with %d entries (selected %s)",
                 len(self.proxy_pool),
-                proxy,
+                mask_proxy_url(proxy),
             )
         else:
             logger.info(

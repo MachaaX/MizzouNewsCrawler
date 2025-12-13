@@ -18,6 +18,7 @@ except ImportError:
     pass
 
 logger = logging.getLogger(__name__)
+from src.crawler.utils import mask_proxy_url
 
 
 class ProxyProvider(Enum):
@@ -380,7 +381,7 @@ class ProxyManager:
         return {
             provider.value: {
                 "enabled": config.enabled,
-                "url": config.url or "N/A",
+                "url": mask_proxy_url(config.url) or "N/A",
                 "health": config.health_status,
                 "success_rate": f"{config.success_rate:.1f}%",
                 "requests": config.success_count + config.failure_count,

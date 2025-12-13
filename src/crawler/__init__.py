@@ -28,6 +28,7 @@ from src.utils.comprehensive_telemetry import ExtractionMetrics
 
 from .origin_proxy import enable_origin_proxy
 from .proxy_config import get_proxy_manager
+from .utils import mask_proxy_url
 
 
 class RateLimitError(Exception):
@@ -2672,7 +2673,6 @@ class ContentExtractor:
 
             # Helper to mask proxy host for metadata/logging (avoid leaking creds)
             from urllib.parse import urlparse
-
             def _host_from_proxy(proxy: str) -> str:
                 try:
                     parsed = urlparse(proxy)
@@ -2680,7 +2680,14 @@ class ContentExtractor:
                 except Exception:
                     return proxy
 
-            # Primary request logic: prefer POST when browser_actions provided (API mode)
+            # Primary request logic: prefer POST for Decodo API when configured
+            # Rationale: Decodo requires X-SU-* headers which the API POST receives
+            # directly; proxy GET via CONNECT may hide the header from the proxy.
+            prefer_api_post = os.getenv("UNBLOCK_PREFER_API_POST", "true").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
             response = None
             used_proxy_host = None
             used_proxy_provider = None
@@ -2689,6 +2696,7 @@ class ContentExtractor:
             used_proxy_status_str = None
 
             try:
+                api_url = proxy_url_env
                 if browser_actions:
                     # Use Decodo headless API in POST mode - include browser actions
                     # auth tuple preferred over proxies for API interactions
@@ -2717,16 +2725,53 @@ class ContentExtractor:
                     )
                     used_proxy_provider = "unblock_api"
                 else:
-                    response = requests.get(
-                        url,
-                        headers=headers,
-                        proxies={"http": proxy_url, "https": proxy_url},
-                        verify=False,
-                        timeout=30,
-                    )
-                    used_proxy_host = _host_from_proxy(proxy_url)
-                    used_proxy_url = proxy_url
-                    used_proxy_authenticated = bool(proxy_user and proxy_pass)
+                    if prefer_api_post:
+                        logger.debug("Using Decodo API POST mode for primary GET-less attempt")
+                        # Primary POST attempt (API mode) - no browser_actions
+                        response = requests.post(
+                            api_url,
+                            json={"url": url},
+                            headers=headers,
+                            auth=(proxy_user, proxy_pass),
+                            verify=False,
+                            timeout=30,
+                        )
+                        used_proxy_host = urlparse(api_url).hostname
+                        used_proxy_url = api_url
+                        used_proxy_authenticated = True
+                        used_proxy_status_str = (
+                            "success"
+                            if response
+                            and response.status_code == 200
+                            and len(response.text or "") >= 5000
+                            and "Access to this page has been denied"
+                            not in (response.text or "")
+                            else "failed"
+                        )
+                        used_proxy_provider = "unblock_api"
+                        # If POST attempt failed, we'll fall through to the existing
+                        # rotating DECODO and fallback POST logic below.
+                    else:
+                        response = requests.get(
+                            url,
+                            headers=headers,
+                            proxies={"http": proxy_url, "https": proxy_url},
+                            verify=False,
+                            timeout=30,
+                        )
+                        used_proxy_host = _host_from_proxy(proxy_url)
+                        used_proxy_url = proxy_url
+                        used_proxy_authenticated = bool(proxy_user and proxy_pass)
+                        used_proxy_status_str = (
+                            "success"
+                            if response
+                            and response.status_code == 200
+                            and len(response.text or "") >= 5000
+                            and "Access to this page has been denied"
+                            not in (response.text or "")
+                            else "failed"
+                        )
+                        used_proxy_provider = "unblock_proxy"
                     used_proxy_status_str = (
                         "success"
                         if response
@@ -2736,7 +2781,6 @@ class ContentExtractor:
                         not in (response.text or "")
                         else "failed"
                     )
-                    used_proxy_provider = "unblock_proxy"
             except (
                 Exception
             ) as e:  # pragma: no cover - network errors exercised in test
@@ -2747,7 +2791,7 @@ class ContentExtractor:
             html_len = len(html)
 
             logger.info(
-                f"Unblock proxy returned {html_len} bytes for {url} (provider: {used_proxy_provider}, host: {used_proxy_host}, url: {used_proxy_url})"
+                f"Unblock proxy returned {html_len} bytes for {url} (provider: {used_proxy_provider}, host: {used_proxy_host}, url: {mask_proxy_url(used_proxy_url)})"
             )
 
             # Check if still blocked
@@ -2849,7 +2893,7 @@ class ContentExtractor:
                     if metrics:
                         metrics.set_proxy_metrics(
                             proxy_used=bool(used_proxy_provider),
-                            proxy_url=used_proxy_url,
+                            proxy_url=mask_proxy_url(used_proxy_url),
                             proxy_authenticated=bool(used_proxy_authenticated),
                             proxy_status=used_proxy_status_str,
                             proxy_error=(
@@ -2876,7 +2920,7 @@ class ContentExtractor:
                     "proxy_used": True,
                     "proxy_host": used_proxy_host,
                     "proxy_provider": used_proxy_provider,
-                    "proxy_url": used_proxy_url,
+                    "proxy_url": mask_proxy_url(used_proxy_url),
                     "proxy_authenticated": bool(used_proxy_authenticated),
                     "proxy_status": used_proxy_status_str,
                     "page_source_length": html_len,
@@ -3079,7 +3123,7 @@ class ContentExtractor:
                     f"Configured proxy extension for {proxy_host}:{proxy_port}"
                 )
             else:
-                logger.warning(f"Could not parse proxy URL: {selenium_proxy}")
+                logger.warning(f"Could not parse proxy URL: {mask_proxy_url(selenium_proxy)}")
 
         # Read optional binary paths from environment
         # Common envs: CHROME_BIN, GOOGLE_CHROME_BIN, CHROMEDRIVER_PATH
