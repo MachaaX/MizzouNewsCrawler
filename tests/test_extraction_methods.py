@@ -764,11 +764,17 @@ class TestContentExtractor:
 class TestRealWorldExtraction:
     """Integration tests for real URLs with missing fields."""
 
-    @pytest.mark.integration
     def test_extraction_on_real_urls_with_missing_fields(
-        self, extractor, requests_mock
+        self, extractor, requests_mock, monkeypatch
     ):
         """Test extraction on realistic HTML with missing fields (mocked)."""
+        # Prevent Selenium fallback from hanging the test
+        monkeypatch.setattr(
+            extractor,
+            "_extract_with_selenium",
+            lambda url: None,
+        )
+
         # Use mocked responses with realistic HTML that has missing fields
         # Based on actual HTML patterns from sites that had extraction issues
 

@@ -1224,18 +1224,29 @@ class ContentExtractor:
         }
         return protection_type in js_required_protections
 
-    def _mark_domain_selenium_only(self, domain: str, protection_type: str) -> None:
-        """Mark a domain as requiring Selenium-only extraction.
+    def _mark_domain_special_extraction(
+        self, domain: str, protection_type: str, method: str = "selenium"
+    ) -> None:
+        """Mark a domain as requiring special extraction method.
 
-        Called when we detect a JS-based bot protection that cannot be
-        bypassed with HTTP requests. This persists to the database so
-        future extraction attempts skip HTTP entirely.
+        Called when we detect bot protection that requires non-standard extraction.
+        For strong protections like PerimeterX, use 'unblock' method with Decodo API.
+        For other JS protections, use 'selenium' method.
+
+        Args:
+            domain: Domain to mark
+            protection_type: Type of bot protection detected
+            method: Extraction method - 'selenium', 'unblock', or 'http'
         """
         from datetime import datetime
 
         from sqlalchemy import text
 
         from src.models.database import DatabaseManager
+
+        # Map strong bot protections to unblock method
+        if protection_type in {"perimeterx", "datadome", "akamai"}:
+            method = "unblock"
 
         try:
             db = DatabaseManager()
@@ -1244,36 +1255,40 @@ class ContentExtractor:
                     text(
                         """
                         UPDATE sources
-                        SET selenium_only = true,
+                        SET extraction_method = :method,
+                            selenium_only = :is_selenium,
                             bot_protection_type = :protection_type,
                             bot_protection_detected_at = :detected_at
                         WHERE host = :host
-                        AND (selenium_only = false OR selenium_only IS NULL)
+                        AND (extraction_method = 'http' OR extraction_method IS NULL)
                     """
                     ),
                     {
                         "host": domain,
+                        "method": method,
+                        "is_selenium": method == "selenium",
                         "protection_type": protection_type,
                         "detected_at": datetime.utcnow(),
                     },
                 )
                 session.commit()
                 logger.info(
-                    f"🔒 Marked {domain} as selenium_only "
+                    f"🔒 Marked {domain} with extraction_method={method} "
                     f"(protection: {protection_type})"
                 )
         except Exception as e:
-            logger.warning(f"Failed to mark {domain} as selenium_only: {e}")
+            logger.warning(f"Failed to mark {domain} extraction method: {e}")
 
-    def _is_domain_selenium_only(self, domain: str) -> tuple[bool, Optional[str]]:
-        """Check if a domain is marked as requiring Selenium-only extraction.
+    def _get_domain_extraction_method(self, domain: str) -> tuple[str, Optional[str]]:
+        """Get the required extraction method for a domain.
 
         Returns:
-            Tuple of (is_selenium_only, protection_type)
+            Tuple of (extraction_method, protection_type)
+            extraction_method: 'http', 'selenium', or 'unblock'
         """
         # Check in-memory cache first
-        cache_key = f"selenium_only:{domain}"
-        cached = getattr(self, "_selenium_only_cache", {}).get(cache_key)
+        cache_key = f"extraction_method:{domain}"
+        cached = getattr(self, "_extraction_method_cache", {}).get(cache_key)
         if cached is not None:
             return cached
 
@@ -1287,7 +1302,7 @@ class ContentExtractor:
                 row = session.execute(
                     text(
                         """
-                        SELECT selenium_only, bot_protection_type
+                        SELECT COALESCE(extraction_method, 'http'), bot_protection_type
                         FROM sources
                         WHERE host = :host
                     """
@@ -1295,20 +1310,22 @@ class ContentExtractor:
                     {"host": domain},
                 ).fetchone()
 
-                if row and row[0]:  # selenium_only is True
-                    result = (True, row[1])
+                if row:
+                    result = (row[0] or "http", row[1])
                 else:
-                    result = (False, None)
+                    result = ("http", None)
 
                 # Cache the result
-                if not hasattr(self, "_selenium_only_cache"):
-                    self._selenium_only_cache = {}
-                self._selenium_only_cache[cache_key] = result
+                if not hasattr(self, "_extraction_method_cache"):
+                    self._extraction_method_cache = {}
+                self._extraction_method_cache[cache_key] = result
                 return result
 
         except Exception as e:
-            logger.debug(f"Failed to check selenium_only for {domain}: {e}")
-            return (False, None)
+            logger.error(
+                f"Failed to check extraction method for {domain}: {e}", exc_info=True
+            )
+            return ("http", None)
 
     def _handle_captcha_backoff(self, domain: str) -> None:
         """Apply extended backoff for CAPTCHA/challenge detections."""
@@ -1482,14 +1499,19 @@ class ContentExtractor:
         self._latest_wire_hints = None
         self._latest_cms_metadata = None
 
-        # Check if domain requires Selenium-only extraction (JS bot protection)
+        # Check if domain requires special extraction method
         domain = urlparse(url).netloc
-        is_selenium_only, protection_type = self._is_domain_selenium_only(domain)
-        skip_http_methods = is_selenium_only
+        extraction_method, protection_type = self._get_domain_extraction_method(domain)
+        skip_http_methods = extraction_method in {"selenium", "unblock"}
 
-        if is_selenium_only:
+        if extraction_method == "unblock":
             logger.info(
-                f"🔒 Domain {domain} marked as selenium_only "
+                f"🔓 Domain {domain} uses unblock proxy extraction "
+                f"(protection: {protection_type}) - using Decodo API"
+            )
+        elif extraction_method == "selenium":
+            logger.info(
+                f"🔒 Domain {domain} uses Selenium extraction "
                 f"(protection: {protection_type}) - skipping HTTP methods"
             )
 
@@ -1652,6 +1674,43 @@ class ContentExtractor:
                     metrics.end_method("beautifulsoup", False, str(e), {})
 
         # Check what fields are still missing after BeautifulSoup
+        missing_fields = self._get_missing_fields(result)
+
+        # For domains marked as 'unblock', use Decodo proxy instead of Selenium
+        if extraction_method == "unblock" and missing_fields:
+            try:
+                logger.info(
+                    f"Attempting unblock proxy extraction for {url} "
+                    f"(missing fields: {missing_fields})"
+                )
+                if metrics:
+                    metrics.start_method("unblock_proxy")
+
+                unblock_result = self._extract_with_unblock_proxy(url)
+
+                if unblock_result and unblock_result.get("content"):
+                    self._merge_extraction_results(
+                        result, unblock_result, "unblock_proxy", missing_fields, metrics
+                    )
+                    logger.info(f"✅ Unblock proxy extraction succeeded for {url}")
+                    if metrics:
+                        metrics.end_method("unblock_proxy", True, None, unblock_result)
+                else:
+                    logger.warning(f"❌ Unblock proxy returned empty result for {url}")
+                    if metrics:
+                        metrics.end_method(
+                            "unblock_proxy",
+                            False,
+                            "No content extracted",
+                            unblock_result or {},
+                        )
+
+            except Exception as e:
+                logger.error(f"❌ Unblock proxy extraction failed for {url}: {e}")
+                if metrics:
+                    metrics.end_method("unblock_proxy", False, str(e), {})
+
+        # Re-check missing fields after unblock attempt
         missing_fields = self._get_missing_fields(result)
 
         # Try Selenium final fallback for remaining missing fields
@@ -2262,10 +2321,12 @@ class ContentExtractor:
                             f"{protection_type}) by {domain}"
                         )
 
-                        # If JS-required protection, mark domain as selenium_only
-                        # so future extractions skip HTTP entirely
+                        # If JS-required protection, mark domain with appropriate extraction method
+                        # Strong protections (PerimeterX, DataDome) use 'unblock', others use 'selenium'
                         if self._is_js_required_protection(protection_type):
-                            self._mark_domain_selenium_only(domain, protection_type)
+                            self._mark_domain_special_extraction(
+                                domain, protection_type
+                            )
 
                         # Record bot detection event
                         is_captcha = self._is_js_required_protection(protection_type)
@@ -2543,6 +2604,101 @@ class ContentExtractor:
 
         return result
 
+    def _extract_with_unblock_proxy(self, url: str) -> Dict[str, Any]:
+        """Extract content using Decodo unblock proxy API for strong bot protection.
+
+        Uses Decodo's headless browser API with special headers to bypass
+        PerimeterX, DataDome, and other enterprise bot protections.
+
+        Args:
+            url: URL to extract
+
+        Returns:
+            Extraction result dict with title, author, content, etc.
+        """
+        try:
+            import warnings
+
+            warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+
+            # Get Decodo unblock proxy credentials from env
+            proxy_url_env = os.getenv(
+                "UNBLOCK_PROXY_URL", "https://unblock.decodo.com:60000"
+            )
+            proxy_user = os.getenv("UNBLOCK_PROXY_USER", "U0000332559")
+            proxy_pass = os.getenv(
+                "UNBLOCK_PROXY_PASS", "PW_1b20cd078bbfbf554faa89e9af56f7ea8"
+            )
+
+            # Build authenticated proxy URL
+            if "://" in proxy_url_env:
+                scheme, remainder = proxy_url_env.split("://", 1)
+                proxy_url = f"{scheme}://{proxy_user}:{proxy_pass}@{remainder}"
+            else:
+                proxy_url = f"https://{proxy_user}:{proxy_pass}@{proxy_url_env}"
+
+            # Decodo API headers for headless browser
+            headers = {
+                "X-SU-Session-Id": "mizzou-crawler",
+                "X-SU-Geo": "United States",
+                "X-SU-Locale": "en-us",
+                "X-SU-Headless": "html",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            }
+
+            logger.info(f"Fetching {url} via Decodo unblock proxy")
+
+            response = requests.get(
+                url,
+                headers=headers,
+                proxies={"http": proxy_url, "https": proxy_url},
+                verify=False,
+                timeout=30,
+            )
+
+            html = response.text
+            html_len = len(html)
+
+            logger.info(f"Unblock proxy returned {html_len} bytes for {url}")
+
+            # Check if still blocked
+            if "Access to this page has been denied" in html or html_len < 5000:
+                logger.warning(
+                    f"Unblock proxy may be blocked for {url} ({html_len} bytes)"
+                )
+                return {}
+
+            # Update wire hints from HTML
+            self._update_wire_hints_from_html(html, url)
+
+            # Parse with BeautifulSoup
+            soup = BeautifulSoup(html, "html.parser")
+
+            result = {
+                "url": url,
+                "title": self._extract_title(soup),
+                "author": self._extract_author(soup),
+                "publish_date": self._extract_published_date(soup, html),
+                "content": self._extract_content(soup),
+                "metadata": {
+                    "meta_description": self._extract_meta_description(soup),
+                    "extraction_method": "unblock_proxy",
+                    "proxy_used": True,
+                    "page_source_length": html_len,
+                    "http_status": response.status_code,
+                },
+                "extracted_at": datetime.utcnow().isoformat(),
+            }
+
+            self._attach_publish_date_fallback_metadata(result)
+
+            logger.info(f"✅ Unblock proxy extraction succeeded for {url}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Unblock proxy extraction failed for {url}: {e}")
+            return {}
+
     def _extract_with_selenium(self, url: str) -> Dict[str, Any]:
         """Extract content using persistent Selenium driver."""
         try:
@@ -2618,7 +2774,8 @@ class ContentExtractor:
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-web-security")
         options.add_argument("--disable-features=VizDisplayCompositor")
-        options.add_argument("--disable-extensions")
+        # Don't disable extensions - we use proxy auth extension
+        # options.add_argument("--disable-extensions")
         options.add_argument("--disable-plugins")
         # Add headless argument explicitly for better container compatibility
         options.add_argument("--headless=new")
@@ -2645,10 +2802,77 @@ class ContentExtractor:
         )
         options.add_argument(f"--user-agent={realistic_ua}")
 
-        # Optional proxy for Selenium
+        # CRITICAL: Configure proxy with authentication for PerimeterX bypass
+        # PerimeterX blocks GKE datacenter IPs, residential proxy required
+        # Use Chrome extension for proxy auth (standard approach)
         selenium_proxy = os.getenv("SELENIUM_PROXY")
+        proxy_extension_path = None
         if selenium_proxy:
-            options.add_argument(f"--proxy-server={selenium_proxy}")
+            # Parse proxy URL: https://user:pass@host:port
+            import re
+
+            proxy_match = re.match(
+                r"https?://([^:]+):([^@]+)@([^:]+):(\d+)", selenium_proxy
+            )
+            if proxy_match:
+                proxy_user, proxy_pass, proxy_host, proxy_port = proxy_match.groups()
+
+                # Create Chrome extension for proxy authentication
+                import tempfile
+                import zipfile
+
+                manifest_json = """{
+                    "version": "1.0.0",
+                    "manifest_version": 2,
+                    "name": "Chrome Proxy Auth",
+                    "permissions": ["proxy", "tabs", "unlimitedStorage", "storage", "<all_urls>", "webRequest", "webRequestBlocking"],
+                    "background": {"scripts": ["background.js"]},
+                    "minimum_chrome_version": "76.0.0"
+                }"""
+
+                background_js = f"""
+                var config = {{
+                    mode: "fixed_servers",
+                    rules: {{
+                        singleProxy: {{
+                            scheme: "http",
+                            host: "{proxy_host}",
+                            port: parseInt({proxy_port})
+                        }},
+                        bypassList: ["localhost"]
+                    }}
+                }};
+
+                chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+
+                function callbackFn(details) {{
+                    return {{
+                        authCredentials: {{
+                            username: "{proxy_user}",
+                            password: "{proxy_pass}"
+                        }}
+                    }};
+                }}
+
+                chrome.webRequest.onAuthRequired.addListener(
+                    callbackFn,
+                    {{urls: ["<all_urls>"]}},
+                    ['blocking']
+                );
+                """
+
+                # Create extension zip file
+                proxy_extension_path = tempfile.mktemp(suffix=".zip")
+                with zipfile.ZipFile(proxy_extension_path, "w") as zp:
+                    zp.writestr("manifest.json", manifest_json)
+                    zp.writestr("background.js", background_js)
+
+                options.add_extension(proxy_extension_path)
+                logger.debug(
+                    f"Configured proxy extension for {proxy_host}:{proxy_port}"
+                )
+            else:
+                logger.warning(f"Could not parse proxy URL: {selenium_proxy}")
 
         # Read optional binary paths from environment
         # Common envs: CHROME_BIN, GOOGLE_CHROME_BIN, CHROMEDRIVER_PATH
@@ -2679,6 +2903,13 @@ class ContentExtractor:
         except Exception as e:
             logger.warning(f"Failed to create undetected driver: {e}")
             raise
+        finally:
+            # Clean up temporary proxy extension file
+            if proxy_extension_path and os.path.exists(proxy_extension_path):
+                try:
+                    os.unlink(proxy_extension_path)
+                except Exception:
+                    pass  # Non-critical cleanup
 
         # Set timeouts - reduced for faster extraction
         driver.set_page_load_timeout(15)  # Reduced from 30
@@ -2693,6 +2924,52 @@ class ContentExtractor:
             )
         except Exception as e:
             logger.debug(f"CDP UA override failed (non-fatal): {e}")
+
+        # Apply additional selenium-stealth for maximum anti-detection
+        # undetected-chromedriver handles basic stealth, but PerimeterX needs more
+        if SELENIUM_STEALTH_AVAILABLE:
+            try:
+                stealth(
+                    driver,
+                    languages=["en-US", "en"],
+                    vendor="Google Inc.",
+                    platform="Win32",
+                    webgl_vendor="Intel Inc.",
+                    renderer="Intel Iris OpenGL Engine",
+                    fix_hairline=True,
+                )
+                logger.debug("Applied selenium-stealth to undetected driver")
+            except Exception as e:
+                logger.debug(f"selenium-stealth application failed (non-fatal): {e}")
+
+        # Manual stealth enhancements for PerimeterX bypass
+        try:
+            driver.execute_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+            driver.execute_script(
+                """
+                // Override plugins to appear more legitimate
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+
+                // Override languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+
+                // Override permissions
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+                """
+            )
+        except Exception as e:
+            logger.debug(f"Manual stealth enhancements failed (non-fatal): {e}")
 
         # CRITICAL FIX: Set command executor timeout to prevent 147s delays
         # Default timeout is 120s, but Selenium waits an additional ~27s

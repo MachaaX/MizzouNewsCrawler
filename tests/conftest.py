@@ -69,22 +69,29 @@ def cleanup_test_database():
 
 
 @pytest.fixture(autouse=True)
-def mock_selenium_only_lookup(monkeypatch):
-    """Mock _is_domain_selenium_only to prevent DB calls in tests.
+def mock_extraction_method_lookup(request, monkeypatch):
+    """Mock _get_domain_extraction_method to prevent DB calls in tests.
 
     This autouse fixture prevents the ContentExtractor from making database
-    queries when checking if a domain requires Selenium-only extraction.
-    By default, returns (False, None) meaning no selenium_only override.
+    queries when checking a domain's extraction method.
+    By default, returns ('http', None) meaning standard HTTP extraction.
 
-    Tests that specifically want to test selenium_only behavior should
+    Tests that specifically want to test special extraction methods should
     override this by providing their own mock.
+
+    This fixture does NOT apply to tests marked with @pytest.mark.integration,
+    as those tests need to exercise real database behavior.
     """
+    # Skip mocking for integration tests that need real DB behavior
+    if "integration" in request.keywords:
+        return
+
     from src.crawler import ContentExtractor
 
     monkeypatch.setattr(
         ContentExtractor,
-        "_is_domain_selenium_only",
-        lambda self, domain: (False, None),
+        "_get_domain_extraction_method",
+        lambda self, domain: ("http", None),
     )
 
 

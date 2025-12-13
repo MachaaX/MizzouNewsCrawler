@@ -410,6 +410,19 @@ spec:
           secretKeyRef:
             name: origin-proxy-credentials
             key: selenium-proxy-url
+      # Decodo Unblock Proxy for strong bot protection (PerimeterX, DataDome)
+      - name: UNBLOCK_PROXY_URL
+        value: "https://unblock.decodo.com:60000"
+      - name: UNBLOCK_PROXY_USER
+        valueFrom:
+          secretKeyRef:
+            name: decodo-unblock-credentials
+            key: username
+      - name: UNBLOCK_PROXY_PASS
+        valueFrom:
+          secretKeyRef:
+            name: decodo-unblock-credentials
+            key: password
       # Rate limiting
       - name: INTER_REQUEST_MIN
         value: "{{inputs.parameters.inter-request-min}}"
