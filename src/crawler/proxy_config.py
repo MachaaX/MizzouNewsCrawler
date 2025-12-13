@@ -6,6 +6,7 @@ import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+from src.crawler.utils import mask_proxy_url
 
 # Suppress InsecureRequestWarning for proxy connections (expected behavior)
 try:
@@ -18,7 +19,6 @@ except ImportError:
     pass
 
 logger = logging.getLogger(__name__)
-from src.crawler.utils import mask_proxy_url
 
 
 class ProxyProvider(Enum):

@@ -25,5 +25,5 @@ def test_enable_origin_proxy_masks_response_proxy_url(monkeypatch):
 
     # Ensure proxy metadata attached and URL is masked
     assert getattr(resp, "_proxy_used", False) is True
-    assert getattr(resp, "_proxy_url") == mask_proxy_url("http://user:pass@proxy.example.com:1234")
-    assert getattr(resp, "_proxy_authenticated") is True
+    assert resp._proxy_url == mask_proxy_url("http://user:pass@proxy.example.com:1234")
+    assert resp._proxy_authenticated is True

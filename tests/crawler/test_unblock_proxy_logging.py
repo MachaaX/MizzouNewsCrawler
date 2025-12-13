@@ -19,7 +19,7 @@ def test_unblock_proxy_does_not_log_password(caplog, monkeypatch):
     large_resp.text = "<html>" + ("x" * 5000) + "</html>"
 
     caplog.set_level(logging.INFO)
-    with patch("requests.post", return_value=large_resp) as mock_post:
+    with patch("requests.post", return_value=large_resp):
         # Run extraction; this should use POST and set proxy metadata
         extractor._extract_with_unblock_proxy("https://example.com/article", None, None)
 

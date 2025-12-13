@@ -912,7 +912,6 @@ def handle_extract_url_command(args) -> int:
         extractor = ContentExtractor()
         byline_cleaner = BylineCleaner()
         content_cleaner = BalancedBoundaryContentCleaner(enable_telemetry=False)
-        telemetry = ComprehensiveExtractionTelemetry()
 
         article_id = str(uuid.uuid4())
         publisher = candidate.source or candidate.source_name or parsed.netloc
@@ -955,12 +954,12 @@ def handle_extract_url_command(args) -> int:
 
         # If necessary, run content cleaning to obtain text
         try:
-            cleaned_text, cleaned_meta = content_cleaner.process_single_article(
+            cleaned_text, _cleaned_meta = content_cleaner.process_single_article(
                 content_text, domain, dry_run=False
             )
         except Exception:
             cleaned_text = content_text
-            cleaned_meta = {}
+            _cleaned_meta = {}
 
         text_hash = calculate_content_hash(cleaned_text)
         now = datetime.utcnow()
