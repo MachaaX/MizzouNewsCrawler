@@ -847,6 +847,60 @@ def test_save_article_classification_creates_and_updates():
 
         manager.close()
 
+    def test_save_article_classification_sets_status_for_cleaned_and_local():
+        with temporary_database() as (db_url, _):
+            manager = DatabaseManager(database_url=db_url)
+
+            article = Article(
+                id="article-status-1",
+                candidate_link_id="cand-1",
+                url="https://example.com/article",
+                status="cleaned",
+                wire_check_status="pending",
+            )
+            manager.session.add(article)
+            manager.session.commit()
+
+            save_article_classification(
+                manager.session,
+                article_id="article-status-1",
+                label_version="2025.09",
+                model_version="model-a",
+                primary_prediction={"label": "news", "score": 0.95},
+                autocommit=True,
+            )
+
+            stored = (
+                manager.session.query(Article).filter_by(id="article-status-1").one()
+            )
+            assert str(stored.status) == "labeled"
+            # Provide a counterexample: 'wire' should not be overwritten by labeling
+            article2 = Article(
+                id="article-status-2",
+                candidate_link_id="cand-1",
+                url="https://example.com/article2",
+                status="wire",
+                wire_check_status="complete",
+            )
+            manager.session.add(article2)
+            manager.session.commit()
+
+            save_article_classification(
+                manager.session,
+                article_id="article-status-2",
+                label_version="2025.09",
+                model_version="model-b",
+                primary_prediction={"label": "sports", "score": 0.85},
+                autocommit=True,
+            )
+
+            stored2 = (
+                manager.session.query(Article).filter_by(id="article-status-2").one()
+            )
+            assert str(stored2.status) == "wire"
+
+            manager.close()
+
 
 def test_save_ml_results_persists_records():
     with temporary_database() as (db_url, _):

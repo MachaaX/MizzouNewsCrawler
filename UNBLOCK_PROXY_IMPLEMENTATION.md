@@ -40,17 +40,10 @@ Implemented a new extraction method using Decodo's unblock proxy API to bypass s
   2. Call `_extract_with_unblock_proxy()` directly
   3. Fall back to Selenium if unblock fails
 - For `extraction_method='selenium'`:
-  1. Skip HTTP methods
-  2. Use Selenium directly
-- For `extraction_method='http'`:
-  1. Standard flow (mcmetadata → newspaper4k → BeautifulSoup → Selenium)
 
 ### 3. Database Migration (`alembic/versions/305f6389a934_add_extraction_method_to_sources.py`)
 - **Adds `extraction_method` column** with default `'http'`
 - **Migrates existing data**:
-  - `selenium_only=true` → `extraction_method='selenium'`
-  - `bot_protection_type='perimeterx'` + `selenium_only=true` → `extraction_method='unblock'`
-- **Creates index** on `extraction_method` for query performance
 - **Downgrade support**: Restores `selenium_only` from `extraction_method`
 
 ### 4. Kubernetes Configuration
@@ -109,9 +102,15 @@ H1: "Young mother shot in car; police search for suspect"
 ## Deployment Steps
 
 1. **Create secret** (one-time):
-   ```bash
-   ./scripts/create-unblock-secret.sh production
-   ```
+  Use `scripts/sync-decodo-credentials.sh` to synchronize credentials across GCP Secret Manager, GitHub, and Kubernetes. Example using environment variables (preferred):
+  ```bash
+  export UNBLOCK_PROXY_USER=U0000332559
+  export UNBLOCK_PROXY_PASS=PW_XXXX
+  export GOOGLE_CLOUD_PROJECT=mizzou-news-crawler
+
+  # Sync to GCP Secret Manager, GitHub repo secrets (LocalNewsImpact/MizzouNewsCrawler), and Kubernetes namespace (production)
+  ./scripts/sync-decodo-credentials.sh --gcp-project "$GOOGLE_CLOUD_PROJECT" --github-repo LocalNewsImpact/MizzouNewsCrawler production
+  ```
 
 2. **Deploy feature** (automated):
    ```bash

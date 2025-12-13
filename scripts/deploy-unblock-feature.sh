@@ -18,9 +18,10 @@ echo "Namespace: $NAMESPACE"
 echo "Branch: $BRANCH"
 echo ""
 
-# Step 1: Create K8s secret
-echo "Step 1/4: Creating unblock proxy secret..."
-./scripts/create-unblock-secret.sh $NAMESPACE
+# Step 1: Sync K8s, GCP and GitHub secrets
+echo "Step 1/4: Syncing unblock proxy credentials to K8s, GCP Secret Manager, and GitHub..."
+# Use existing environment vars if present: UNBLOCK_PROXY_USER / UNBLOCK_PROXY_PASS
+./scripts/sync-decodo-credentials.sh --gcp-project "$GOOGLE_CLOUD_PROJECT" --github-repo "LocalNewsImpact/MizzouNewsCrawler" production
 echo ""
 
 # Step 2: Run database migration

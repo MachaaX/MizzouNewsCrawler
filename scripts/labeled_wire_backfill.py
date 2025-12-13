@@ -40,7 +40,7 @@ def main():
             total_count = session.execute(text("""
                 SELECT COUNT(*)
                 FROM articles
-                WHERE status = 'labeled'
+                WHERE status = 'labeled' AND wire_check_status = 'complete'
             """)).scalar()
             
             print(f"Total labeled articles: {total_count:,}")
@@ -60,7 +60,7 @@ def main():
                         cl.source
                     FROM articles a
                     LEFT JOIN candidate_links cl ON a.candidate_link_id = cl.id
-                    WHERE a.status = 'labeled'
+                    WHERE a.status = 'labeled' AND a.wire_check_status = 'complete'
                     ORDER BY a.id
                     LIMIT :batch_size OFFSET :offset
                 """), {"batch_size": batch_size, "offset": offset}).fetchall()

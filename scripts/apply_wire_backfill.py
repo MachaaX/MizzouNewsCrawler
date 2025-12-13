@@ -56,7 +56,7 @@ def update_postgres_status(article_ids: set[str], dry_run: bool = True) -> int:
             SET status = 'wire',
                 updated_at = NOW()
             WHERE id = ANY(:ids)
-            AND status = 'labeled'
+            AND status = 'labeled' AND wire_check_status = 'complete'
             RETURNING id
         """), {"ids": list(article_ids)})
         

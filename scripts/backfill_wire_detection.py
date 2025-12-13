@@ -49,6 +49,7 @@ def get_candidates_for_backfill(session, limit: int = None) -> list[tuple]:
         FROM articles a
         INNER JOIN article_labels al ON a.id = al.article_id
         WHERE al.status = 'labeled'
+        AND a.wire_check_status = 'complete'
         AND a.content IS NOT NULL
         AND a.content != ''
         ORDER BY a.publish_date DESC
