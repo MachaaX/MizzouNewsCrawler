@@ -523,7 +523,7 @@ class TestFieldLevelExtractionAndFallbacks:
         )
 
         # Patch requests.get to return small then big (proxy fallback)
-        with patch("requests.get", side_effect=[mock_small, mock_big]) as mock_get:
+        with patch("requests.get", side_effect=[mock_small, mock_big]):
             # Provide a fake rotating proxy via proxy_manager
             extractor.proxy_manager = Mock()
             extractor.proxy_manager.get_requests_proxies.return_value = {
@@ -562,7 +562,7 @@ class TestFieldLevelExtractionAndFallbacks:
         mock_post.text = "<html><head><title>OK</title></head><body>" + ("x" * 5000) + "</body></html>"
 
         # Patch sequences: requests.get (primary), requests.get(rotating), requests.post(fallback)
-        with patch("requests.get", side_effect=[mock_small, mock_small2]) as mock_get:
+        with patch("requests.get", side_effect=[mock_small, mock_small2]):
             with patch("requests.post", return_value=mock_post) as mock_post_fn:
                 extractor.proxy_manager = Mock()
                 extractor.proxy_manager.get_requests_proxies.return_value = {
