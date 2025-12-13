@@ -720,7 +720,9 @@ class TestPostgreSQLIntegration:
         # so a separate connection (which DatabaseManager would create) cannot see the data.
         with patch("src.models.database.DatabaseManager") as MockDBManager:
             mock_db_instance = MockDBManager.return_value
-            mock_db_instance.get_session.return_value.__enter__.return_value = cloud_sql_session
+            mock_db_instance.get_session.return_value.__enter__.return_value = (
+                cloud_sql_session
+            )
 
             extractor = ContentExtractor()
             # Clear cache to force database lookup
@@ -756,7 +758,9 @@ class TestPostgreSQLIntegration:
 
         with patch("src.models.database.DatabaseManager") as MockDBManager:
             mock_db_instance = MockDBManager.return_value
-            mock_db_instance.get_session.return_value.__enter__.return_value = cloud_sql_session
+            mock_db_instance.get_session.return_value.__enter__.return_value = (
+                cloud_sql_session
+            )
 
             extractor = ContentExtractor()
             extractor._mark_domain_special_extraction("mark-test.com", "perimeterx")
@@ -830,7 +834,9 @@ class TestPostgreSQLIntegration:
 
         with patch("src.models.database.DatabaseManager") as MockDBManager:
             mock_db_instance = MockDBManager.return_value
-            mock_db_instance.get_session.return_value.__enter__.return_value = cloud_sql_session
+            mock_db_instance.get_session.return_value.__enter__.return_value = (
+                cloud_sql_session
+            )
 
             extractor = ContentExtractor()
             # Clear cache
