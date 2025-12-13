@@ -40,17 +40,10 @@ Implemented a new extraction method using Decodo's unblock proxy API to bypass s
   2. Call `_extract_with_unblock_proxy()` directly
   3. Fall back to Selenium if unblock fails
 - For `extraction_method='selenium'`:
-  1. Skip HTTP methods
-  2. Use Selenium directly
-- For `extraction_method='http'`:
-  1. Standard flow (mcmetadata → newspaper4k → BeautifulSoup → Selenium)
 
 ### 3. Database Migration (`alembic/versions/305f6389a934_add_extraction_method_to_sources.py`)
 - **Adds `extraction_method` column** with default `'http'`
 - **Migrates existing data**:
-  - `selenium_only=true` → `extraction_method='selenium'`
-  - `bot_protection_type='perimeterx'` + `selenium_only=true` → `extraction_method='unblock'`
-- **Creates index** on `extraction_method` for query performance
 - **Downgrade support**: Restores `selenium_only` from `extraction_method`
 
 ### 4. Kubernetes Configuration
