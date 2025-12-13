@@ -394,14 +394,22 @@ class NewsDiscovery:
             self.session.proxies.update(proxies)
             proxy_values = [p for p in proxies.values() if p]
             if proxy_values:
-                merged_pool = env_proxy_pool + proxy_values
-                deduped_pool: list[str] = []
-                seen: set[str] = set()
-                for value in merged_pool:
-                    if value and value not in seen:
-                        deduped_pool.append(value)
-                        seen.add(value)
-                self.proxy_pool = deduped_pool
+                # Respect explicit PROXY_POOL configuration: if the environment
+                # provides a legacy proxy list, prefer it rather than merging
+                # provider-supplied proxies into the pool. This preserves the
+                # expected behavior for debugging and operator overrides.
+                if env_proxy_pool:
+                    # Keep the env-provided pool as-is (deduped already)
+                    self.proxy_pool = list(env_proxy_pool)
+                else:
+                    merged_pool = env_proxy_pool + proxy_values
+                    deduped_pool: list[str] = []
+                    seen: set[str] = set()
+                    for value in merged_pool:
+                        if value and value not in seen:
+                            deduped_pool.append(value)
+                            seen.add(value)
+                    self.proxy_pool = deduped_pool
             logger.info(
                 "🔐 Discovery using %s proxy provider (%s)",
                 active_provider.value,
