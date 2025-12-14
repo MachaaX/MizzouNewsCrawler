@@ -1,16 +1,15 @@
 import subprocess
 import sys
 
+
 PY = sys.executable
 
 
 def run_help(cmd_args):
-    proc = subprocess.run(
-        [PY, "-m", "src.cli.cli_modular"] + cmd_args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    proc = subprocess.run([PY, "-m", "src.cli.cli_modular"] + cmd_args,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT,
+                          text=True)
     return proc.returncode, proc.stdout
 
 
