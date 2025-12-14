@@ -1,4 +1,6 @@
+import builtins
 import sys
+from types import ModuleType, SimpleNamespace
 
 from src.cli import cli_modular
 
@@ -122,3 +124,66 @@ def test_cli_modular_routes_all_supported_commands(monkeypatch):
 
         assert result == f"handled-{command}"
         assert called["command"] == command
+
+
+def test_cli_modular_main_displays_available_commands(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["prog"])
+
+    result = cli_modular.main()
+
+    assert result == 1
+    captured = capsys.readouterr().err
+    assert "Available commands" in captured
+
+
+def test_cli_modular_main_honors_overrides(monkeypatch):
+    def override_handler(args):
+        return f"override:{args.command}"
+
+    def fail_loader(_command):  # should not be called when override provided
+        raise AssertionError("_load_command_parser should not run")
+
+    monkeypatch.setattr(cli_modular, "_load_command_parser", fail_loader)
+
+    result = cli_modular.main(
+        ["status"], handler_overrides={"status": override_handler}
+    )
+
+    assert result == "override:status"
+
+
+def test_resolve_handler_lazy_import_success(monkeypatch):
+    commands_pkg = ModuleType("src.cli.commands")
+    commands_pkg.__path__ = []  # pragma: no cover - required for package semantics
+    handler_module = ModuleType("src.cli.commands.extraction")
+
+    def stub_handler(args):
+        return f"handled:{args.command}"
+
+    handler_module.handle_extraction_command = stub_handler
+
+    monkeypatch.setitem(sys.modules, "src.cli.commands", commands_pkg)
+    monkeypatch.setitem(sys.modules, "src.cli.commands.extraction", handler_module)
+
+    args = SimpleNamespace(command="extract", func=None)
+
+    resolved = cli_modular._resolve_handler(args)
+
+    assert resolved is stub_handler
+
+
+def test_resolve_handler_lazy_import_failure(monkeypatch):
+    original_import = builtins.__import__
+
+    def failing_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.endswith("commands.extraction"):
+            raise ModuleNotFoundError("simulated missing dependency")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+
+    args = SimpleNamespace(command="extract", func=None)
+
+    resolved = cli_modular._resolve_handler(args)
+
+    assert resolved is None
