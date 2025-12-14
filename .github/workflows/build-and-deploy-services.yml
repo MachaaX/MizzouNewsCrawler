@@ -410,7 +410,7 @@ jobs:
           echo ""
           
           # Store build IDs from submitted jobs
-          SERVICES="${{ needs.detect-changes.outputs.services-to-build }}"
+          SERVICES="${{ needs.detect-changes.outputs.services_to_build }}"
           
           if [ "$SERVICES" == "none" ]; then
             echo "ℹ️  No service rebuilds - skipping build wait"
@@ -494,9 +494,9 @@ jobs:
       - name: Report build status
         run: |
           echo "=== Build and Deploy Summary ==="
-          echo "Services targeted: ${{ needs.detect-changes.outputs.services-to-build }}"
+          echo "Services targeted: ${{ needs.detect-changes.outputs.services_to_build }}"
           
-          if [ "${{ needs.detect-changes.outputs.services-to-build }}" == "none" ]; then
+          if [ "${{ needs.detect-changes.outputs.services_to_build }}" == "none" ]; then
             echo "ℹ️  No service rebuilds detected (documentation/config-only changes)"
           else
             BUILD_RESULT="${{ needs.wait-for-builds.result }}"
