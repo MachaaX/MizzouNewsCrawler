@@ -506,6 +506,8 @@ def handle_extraction_command(args) -> int:
     if ContentExtractor is None:  # pragma: no cover - defensive fallback
         raise RuntimeError("ContentExtractor dependency is unavailable")
 
+    # Normal batch extraction flow
+
     extractor_cls = ContentExtractor
     process_accepts_db = "db" in inspect.signature(_process_batch).parameters
     post_clean_accepts_db = (
