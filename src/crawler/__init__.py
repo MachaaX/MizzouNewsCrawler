@@ -11,6 +11,7 @@ import re
 import sys
 import threading
 import time
+import uuid
 from copy import deepcopy
 from datetime import datetime
 from html import unescape
@@ -2662,14 +2663,63 @@ class ContentExtractor:
             else:
                 proxy_url = f"https://{proxy_user}:{proxy_pass}@{proxy_url_env}"
 
+            # Generate randomized fingerprint headers so each unblock request looks unique
+            session_id = uuid.uuid4().hex
+            device_id = uuid.uuid4().hex
+            fingerprint = hashlib.sha256(
+                f"{session_id}:{device_id}:{random.random()}".encode()
+            ).hexdigest()
+            forwarded_for = ".".join(str(random.randint(1, 254)) for _ in range(4))
+
+            user_agent_pool = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            ]
+            user_agent = random.choice(user_agent_pool)
+
+            client_hint_pool = [
+                {
+                    "sec-ch-ua": '"Chromium";v="120", "Google Chrome";v="120", "Not?A Brand";v="24"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                },
+                {
+                    "sec-ch-ua": '"Chromium";v="120", "Microsoft Edge";v="120", "Not?A Brand";v="24"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                },
+                {
+                    "sec-ch-ua": '"Not.A/Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"macOS"',
+                },
+            ]
+            client_hints = random.choice(client_hint_pool)
+
             # Decodo API headers for headless browser
             headers = {
-                "X-SU-Session-Id": "mizzou-crawler",
+                "X-SU-Session-Id": session_id,
+                "X-SU-Device-Id": device_id,
+                "X-SU-Fingerprint": fingerprint,
+                "X-SU-Forwarded-For": forwarded_for,
                 "X-SU-Geo": "United States",
                 "X-SU-Locale": "en-us",
                 "X-SU-Headless": "html",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": user_agent,
             }
+            headers.update(client_hints)
+
+            # Force identity encoding so Decodo returns the full HTML payload and
+            # rotate other headers to mimic real browsers.
+            headers.update(
+                {
+                    "Accept": random.choice(self.accept_header_pool),
+                    "Accept-Language": random.choice(self.accept_language_pool),
+                    "Accept-Encoding": "identity",
+                    "Cache-Control": "max-age=0",
+                }
+            )
 
             logger.info(f"Fetching {url} via Decodo unblock proxy")
 
@@ -2796,6 +2846,7 @@ class ContentExtractor:
 
             html = response.text if response is not None else ""
             html_len = len(html)
+            challenge_detected = "Access to this page has been denied" in html
 
             logger.info(
                 f"Unblock proxy returned {html_len} bytes for {url} (provider: {used_proxy_provider}, host: {used_proxy_host}, url: {mask_proxy_url(used_proxy_url)})"
@@ -2804,11 +2855,11 @@ class ContentExtractor:
             # Check if still blocked
             if (
                 response is None
-                or "Access to this page has been denied" in html
+                or challenge_detected
                 or html_len < UNBLOCK_MIN_HTML_BYTES
             ):
                 logger.warning(
-                    f"Unblock proxy may be blocked or returned small HTML for {url} ({html_len} bytes); attempting fallbacks"
+                    f"Unblock proxy may be blocked or returned small HTML for {url} (len={html_len}, challenge={challenge_detected}); attempting fallbacks"
                 )
 
                 # Fallback 1: Try rotating DECODO provider via ProxyManager (proxy manager may be configured to DECODO)
@@ -2894,19 +2945,41 @@ class ContentExtractor:
                 except Exception as e:
                     logger.debug(f"Unblock fallback attempts failed for {url}: {e}")
 
-                # After fallbacks, if nothing succeeded, return empty -> trigger Selenium fallback in caller
-                if response is None or len(html) < UNBLOCK_MIN_HTML_BYTES:
-                    # Update telemetry metrics to capture failed proxy usage
+                # After fallbacks, if nothing succeeded or we still have a challenge page, return empty -> trigger Selenium fallback in caller
+                html_len = len(html)
+                challenge_detected = "Access to this page has been denied" in html
+                if (
+                    response is None
+                    or html_len < UNBLOCK_MIN_HTML_BYTES
+                    or challenge_detected
+                ):
+                    if challenge_detected:
+                        logger.warning(
+                            f"Unblock proxy returned challenge page for {url}; escalating to Selenium fallback"
+                        )
+
+                    proxy_status = (
+                        "challenge_page"
+                        if challenge_detected
+                        else ("failed" if response is None else "small_response")
+                    )
+                    proxy_error = (
+                        "challenge_page"
+                        if challenge_detected
+                        else ("no_response" if response is None else "small_response")
+                    )
+
+                    used_proxy_status_str = proxy_status
+
                     if metrics:
                         metrics.set_proxy_metrics(
                             proxy_used=bool(used_proxy_provider),
                             proxy_url=mask_proxy_url(used_proxy_url),
                             proxy_authenticated=bool(used_proxy_authenticated),
-                            proxy_status=used_proxy_status_str,
-                            proxy_error=(
-                                None if response is None else "small_response"
-                            ),
+                            proxy_status=proxy_status,
+                            proxy_error=proxy_error,
                         )
+
                     return {}
 
             # Update wire hints from HTML

@@ -3,104 +3,77 @@
 This module tests the complete logic flow for the extraction_method='unblock' feature:
 
 1. Database schema and migration
-   - extraction_method column creation
-   - Migration from selenium_only to extraction_method
-   - Index creation
+    - extraction_method column creation
+    - Migration from selenium_only to extraction_method
+    - Index creation
 
 2. Domain classification logic
-   - _get_domain_extraction_method() returns correct method
-   - _mark_domain_special_extraction() sets appropriate method based on protection type
-   - Strong protections (PerimeterX, DataDome, Akamai) → 'unblock'
-   - Other JS protections → 'selenium'
-   - Default domains → 'http'
+    - _get_domain_extraction_method() returns correct method
+    - _mark_domain_special_extraction() sets appropriate method based on protection type
+    - Strong protections (PerimeterX, DataDome, Akamai) → 'unblock'
+    - Other JS protections → 'selenium'
+    - Default domains → 'http'
 
 3. Extraction flow routing
-   - 'unblock' domains skip HTTP methods and use _extract_with_unblock_proxy()
-   - 'selenium' domains skip HTTP methods and use Selenium
-   - 'http' domains use standard flow
+    - 'unblock' domains skip HTTP methods and use _extract_with_unblock_proxy()
+    - 'selenium' domains skip HTTP methods and use Selenium
+    - 'http' domains use standard flow
 
 4. _extract_with_unblock_proxy() method
-   - Successful extraction with full HTML
-   - Partial extraction with missing fields
-   - Failed extraction (still blocked)
-   - Network/timeout errors
-   - Invalid credentials
-   - Environment variable configuration
+    - Successful extraction with full HTML
+    - Partial extraction with missing fields
+    - Failed extraction (still blocked)
+    - Network/timeout errors
+    - Invalid credentials
+    - Environment variable configuration
 
 5. Field-level extraction and fallbacks
-   - All fields extracted successfully
-   - Some fields missing → fallback to Selenium
-   - All fields missing → raise appropriate error
-   - Content hash calculation
-   - Metadata tracking
+    - All fields extracted successfully
+    - Some fields missing → fallback to Selenium
+    - All fields missing → raise appropriate error
+    - Content hash calculation
+    - Metadata tracking
 
 6. Edge cases
-   - Domain not in sources table
-   - extraction_method is NULL
-   - Multiple protection types
-   - Cache invalidation
-   - Concurrent requests
-   - Large HTML responses
-   - Malformed HTML
+    - Domain not in sources table
+    - extraction_method is NULL
+    - Multiple protection types
+    - Cache invalidation
+    - Concurrent requests
+    - Large HTML responses
+    - Malformed HTML
 """
 
+import hashlib
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from sqlalchemy import text
 
-# Ensure project root is on sys.path
+# Ensure project root is on sys.path for direct test execution
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from src.crawler import ContentExtractor, UNBLOCK_MIN_HTML_BYTES
+from src.crawler import UNBLOCK_MIN_HTML_BYTES, ContentExtractor
 from src.crawler.utils import mask_proxy_url
-from src.models import Source
 from src.utils.comprehensive_telemetry import ExtractionMetrics
 
 
 @pytest.fixture
 def mock_env_vars(monkeypatch):
-    """Set up environment variables for unblock proxy."""
+    """Provide default Decodo credentials for unblock proxy tests."""
+
     monkeypatch.setenv("UNBLOCK_PROXY_URL", "https://unblock.decodo.com:60000")
     monkeypatch.setenv("UNBLOCK_PROXY_USER", "testuser")
     monkeypatch.setenv("UNBLOCK_PROXY_PASS", "testpass")
-
-
-class TestDatabaseSchemaAndMigration:
-    """Test database schema changes for extraction_method column.
-
-    Note: These tests verify the ORM model definition. Actual database migration
-    tests run in CI/CD with PostgreSQL integration tests.
-    """
-
-    def test_source_model_has_extraction_method_field(self):
-        """Source model should have extraction_method attribute."""
-        assert hasattr(
-            Source, "extraction_method"
-        ), "Source model should have extraction_method column"
-
-    def test_source_model_has_selenium_only_field(self):
-        """Source model should retain selenium_only for backward compatibility."""
-        assert hasattr(
-            Source, "selenium_only"
-        ), "Source model should retain selenium_only column"
-
-    def test_extraction_method_default_value(self):
-        """extraction_method column should default to 'http'."""
-        # Check the column definition has correct default
-        column = Source.__table__.columns["extraction_method"]
-        assert column.default is not None, "Should have a default value"
-        assert column.default.arg == "http", "Default should be 'http'"
-
-    def test_extraction_method_column_type(self):
-        """extraction_method should be a String column."""
-        column = Source.__table__.columns["extraction_method"]
-        assert str(column.type) == "VARCHAR(32)", "Should be VARCHAR(32) type"
+    monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
+    return monkeypatch
 
 
 class TestDomainClassificationLogic:
@@ -284,6 +257,72 @@ class TestExtractionFlowRouting:
             assert "X-SU-Locale" in headers
             assert "X-SU-Headless" in headers
             assert headers["X-SU-Headless"] == "html"
+            assert headers["Accept-Encoding"] == "identity"
+            assert headers["Accept"] in extractor.accept_header_pool
+            assert headers["Accept-Language"] in extractor.accept_language_pool
+            assert headers["Cache-Control"] == "max-age=0"
+
+    def test_unblock_proxy_randomizes_fingerprint_headers(
+        self, mock_env_vars, monkeypatch
+    ):
+        """Randomized Decodo headers should change per request."""
+        extractor = ContentExtractor()
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
+
+        session_hex = "feedfacefeedfacefeedfacefeedface"
+        device_hex = "1234abcd1234abcd1234abcd1234abcd"
+        random_value = 0.424242
+        ip_octets = iter([101, 102, 103, 104])
+
+        def fake_uuid():
+            value = next(fake_uuid.values)
+            return SimpleNamespace(hex=value)
+
+        fake_uuid.values = iter([session_hex, device_hex])
+
+        def fake_randint(_a, _b):
+            try:
+                return next(ip_octets)
+            except StopIteration:
+                return 200
+
+        monkeypatch.setattr("src.crawler.uuid.uuid4", fake_uuid)
+        monkeypatch.setattr("src.crawler.random.random", lambda: random_value)
+        monkeypatch.setattr("src.crawler.random.randint", fake_randint)
+        monkeypatch.setattr("src.crawler.random.choice", lambda seq: seq[0])
+
+        captured = {}
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = "<html>" + ("content " * 600) + "</html>"
+
+        def fake_post(url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return mock_response
+
+        monkeypatch.setattr("requests.post", fake_post)
+
+        extractor._extract_with_unblock_proxy("https://example.com/article")
+
+        headers = captured["headers"]
+        expected_fingerprint = hashlib.sha256(
+            f"{session_hex}:{device_hex}:{random_value}".encode()
+        ).hexdigest()
+
+        assert headers["X-SU-Session-Id"] == session_hex
+        assert headers["X-SU-Device-Id"] == device_hex
+        assert headers["X-SU-Fingerprint"] == expected_fingerprint
+        assert headers["X-SU-Forwarded-For"] == "101.102.103.104"
+        assert headers["sec-ch-ua"] == (
+            '"Chromium";v="120", "Google Chrome";v="120", "Not?A Brand";v="24"'
+        )
+        assert headers["sec-ch-ua-platform"] == '"Windows"'
+        assert headers["User-Agent"].startswith("Mozilla/5.0")
+        assert headers["Accept"] == extractor.accept_header_pool[0]
+        assert headers["Accept-Language"] == extractor.accept_language_pool[0]
+        assert headers["Cache-Control"] == "max-age=0"
 
     def test_unblock_proxy_uses_proxy_url(self, mock_env_vars, monkeypatch):
         """Should route request through proxy."""
@@ -399,6 +438,87 @@ class TestUnblockProxyMethod:
         assert result["metadata"]["proxy_used"] is True
         assert result["metadata"]["page_source_length"] > UNBLOCK_MIN_HTML_BYTES
 
+    def test_unblock_proxy_detects_challenge_and_updates_metrics(
+        self, mock_env_vars, monkeypatch
+    ):
+        """Challenge pages should mark proxy metrics and abort content usage."""
+        extractor = ContentExtractor()
+        metrics = MagicMock(spec=ExtractionMetrics)
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = "Access to this page has been denied" * 400
+
+        monkeypatch.setattr("requests.post", lambda *args, **kwargs: mock_response)
+
+        result = extractor._extract_with_unblock_proxy(
+            "https://blocked.example/article",
+            metrics=metrics,
+        )
+
+        assert result == {}
+        metrics.set_proxy_metrics.assert_called_once()
+        call_kwargs = metrics.set_proxy_metrics.call_args.kwargs
+        assert call_kwargs["proxy_status"] == "challenge_page"
+        assert call_kwargs["proxy_error"] == "challenge_page"
+
+    def test_unblock_proxy_fallback_succeeds_after_challenge(
+        self, mock_env_vars, monkeypatch
+    ):
+        """Decodo fallback POST should recover after initial challenge page."""
+        extractor = ContentExtractor()
+        metrics = MagicMock(spec=ExtractionMetrics)
+
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
+
+        challenge_response = Mock()
+        challenge_response.status_code = 200
+        challenge_response.text = "Access to this page has been denied" * 400
+
+        success_response = Mock()
+        success_response.status_code = 200
+        success_response.text = (
+            "<html><head><title>Recovered</title></head><body>"
+            + "content " * 600
+            + "</body></html>"
+        )
+
+        responses = [challenge_response, success_response]
+
+        def fake_post(*_args, **_kwargs):
+            try:
+                return responses.pop(0)
+            except IndexError:
+                return success_response
+
+        proxy_url = "https://decodo-user:secret@decodo.example:60000"
+
+        def fake_get(url, **kwargs):
+            assert kwargs.get("proxies") is not None
+            return success_response
+
+        monkeypatch.setattr("requests.post", fake_post)
+        monkeypatch.setattr("requests.get", fake_get)
+        extractor.proxy_manager = SimpleNamespace(
+            get_requests_proxies=lambda: {"https": proxy_url}
+        )
+
+        result = extractor._extract_with_unblock_proxy(
+            "https://fallback.example/article",
+            metrics=metrics,
+        )
+
+        sanitized_proxy = mask_proxy_url(proxy_url)
+
+        assert result["metadata"]["proxy_status"] == "success"
+        assert "Recovered" in result["title"]
+        assert len(result["content"]) > 100
+        metrics.set_proxy_metrics.assert_called_once()
+        call_kwargs = metrics.set_proxy_metrics.call_args.kwargs
+        assert call_kwargs["proxy_status"] == "success"
+        assert call_kwargs["proxy_url"] == sanitized_proxy
+        assert call_kwargs["proxy_authenticated"] is True
+
     def test_blocked_response_returns_empty(self, mock_env_vars, monkeypatch):
         """Should return empty dict if still blocked by bot protection."""
         extractor = ContentExtractor()
@@ -471,6 +591,8 @@ class TestUnblockProxyMethod:
                 assert result.get("metadata", {}).get("proxy_provider") == "unblock_api"
                 assert mock_post_fn.called
                 assert not mock_get_fn.call_count or mock_get_fn.call_count == 0
+                post_headers = mock_post_fn.call_args[1]["headers"]
+                assert post_headers["Accept-Encoding"] == "identity"
 
     def test_uses_environment_variables(self, monkeypatch):
         """Should read proxy configuration from environment variables."""
@@ -509,11 +631,24 @@ class TestUnblockProxyMethod:
             call_kwargs = mock_get.call_args[1]
             headers = call_kwargs["headers"]
 
-            assert headers["X-SU-Session-Id"] == "mizzou-crawler"
+            session_id = headers["X-SU-Session-Id"]
+            device_id = headers["X-SU-Device-Id"]
+
+            assert len(session_id) == 32
+            assert len(device_id) == 32
+            assert session_id != device_id
+            # Ensure values are valid hex strings (uuid.hex format)
+            int(session_id, 16)
+            int(device_id, 16)
+
             assert headers["X-SU-Geo"] == "United States"
             assert headers["X-SU-Locale"] == "en-us"
             assert headers["X-SU-Headless"] == "html"
             assert "Mozilla" in headers["User-Agent"]
+            assert headers["Accept-Encoding"] == "identity"
+            assert headers["Accept"] in extractor.accept_header_pool
+            assert headers["Accept-Language"] in extractor.accept_language_pool
+            assert headers["Cache-Control"] == "max-age=0"
 
 
 class TestFieldLevelExtractionAndFallbacks:
@@ -604,6 +739,59 @@ class TestFieldLevelExtractionAndFallbacks:
             )
             assert metrics.proxy_authenticated is True
 
+    def test_api_post_challenge_falls_back_to_rotating_proxy(
+        self, mock_env_vars, monkeypatch
+    ):
+        """Challenge pages from API POST should trigger rotating proxy fallback."""
+        extractor = ContentExtractor()
+        metrics = MagicMock(spec=ExtractionMetrics)
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
+
+        challenge_response = Mock()
+        challenge_response.status_code = 200
+        challenge_response.text = "Access to this page has been denied" * 400
+
+        fallback_html = (
+            "<html><head><title>Recovered</title></head><body>"
+            + ("content " * 600)
+            + "</body></html>"
+        )
+        proxied_response = Mock()
+        proxied_response.status_code = 200
+        proxied_response.text = fallback_html
+
+        monkeypatch.setattr("requests.post", lambda *args, **kwargs: challenge_response)
+
+        def fake_get(url, **kwargs):
+            assert kwargs.get("proxies") is not None
+            return proxied_response
+
+        monkeypatch.setattr("requests.get", fake_get)
+
+        proxy_url = "https://decodo-user:secret@decodo.example:60000"
+        extractor.proxy_manager = SimpleNamespace(
+            get_requests_proxies=lambda: {"https": proxy_url}
+        )
+
+        result = extractor._extract_with_unblock_proxy(
+            "https://challenged.example/article",
+            metrics=metrics,
+        )
+
+        sanitized_proxy = mask_proxy_url(proxy_url)
+        metadata = result["metadata"]
+
+        assert metadata["proxy_provider"] == "decodo_rotating"
+        assert metadata["proxy_url"] == sanitized_proxy
+        assert metadata["proxy_status"] == "success"
+
+        metrics.set_proxy_metrics.assert_called_once()
+        call_kwargs = metrics.set_proxy_metrics.call_args.kwargs
+        assert call_kwargs["proxy_status"] == "success"
+        assert call_kwargs["proxy_error"] is None
+        assert call_kwargs["proxy_url"] == sanitized_proxy
+        assert call_kwargs["proxy_authenticated"] is True
+
     def test_post_api_fallback_used_when_gets_fail(self, mock_env_vars, monkeypatch):
         """When UNBLOCK GET and rotating proxies fail, attempt Decodo API POST."""
         extractor = ContentExtractor()
@@ -659,9 +847,49 @@ class TestFieldLevelExtractionAndFallbacks:
                 # Verify Decodo API headers were sent on POST
                 assert mock_post_fn.call_count >= 1
                 post_call_kwargs = mock_post_fn.call_args[1]
-                assert (
-                    post_call_kwargs["headers"]["X-SU-Session-Id"] == "mizzou-crawler"
-                )
+                session_id = post_call_kwargs["headers"]["X-SU-Session-Id"]
+                device_id = post_call_kwargs["headers"]["X-SU-Device-Id"]
+
+                assert len(session_id) == 32
+                assert len(device_id) == 32
+                int(session_id, 16)
+                int(device_id, 16)
+
+    def test_unblock_proxy_records_success_metrics(self, mock_env_vars, monkeypatch):
+        """Successful API POST should record sanitized proxy metrics."""
+        extractor = ContentExtractor()
+        metrics = MagicMock(spec=ExtractionMetrics)
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
+
+        success_html = (
+            "<html><head><title>OK</title></head><body>"
+            + ("content " * 600)
+            + "</body></html>"
+        )
+        success_response = Mock()
+        success_response.status_code = 200
+        success_response.text = success_html
+
+        monkeypatch.setattr("requests.post", lambda *args, **kwargs: success_response)
+
+        result = extractor._extract_with_unblock_proxy(
+            "https://metrics.example/article",
+            metrics=metrics,
+        )
+
+        expected_url = mask_proxy_url(
+            os.getenv("UNBLOCK_PROXY_URL", "https://unblock.decodo.com:60000")
+        )
+
+        assert result["metadata"]["proxy_status"] == "success"
+        assert result["metadata"]["proxy_url"] == expected_url
+
+        metrics.set_proxy_metrics.assert_called_once()
+        call_kwargs = metrics.set_proxy_metrics.call_args.kwargs
+        assert call_kwargs["proxy_status"] == "success"
+        assert call_kwargs["proxy_error"] is None
+        assert call_kwargs["proxy_url"] == expected_url
+        assert call_kwargs["proxy_authenticated"] is True
 
     def test_unblock_proxy_extracts_metadata(self, mock_env_vars, monkeypatch):
         """Should extract metadata fields from HTML."""

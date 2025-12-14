@@ -2,7 +2,7 @@ import logging
 import os
 from unittest.mock import Mock, patch
 
-from src.crawler import ContentExtractor, UNBLOCK_MIN_HTML_BYTES
+from src.crawler import UNBLOCK_MIN_HTML_BYTES, ContentExtractor
 
 
 def test_unblock_proxy_does_not_log_password(caplog, monkeypatch):
