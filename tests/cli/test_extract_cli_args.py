@@ -38,3 +38,13 @@ def test_extract_url_help_includes_url_positional():
 
     block = out[pos_idx : pos_idx + 400]
     assert "url" in block
+
+
+def test_extract_command_uses_batch_handler():
+    """`extract` must resolve to the batch handler, not the single-URL command."""
+
+    from src.cli import cli_modular
+
+    parser_func, handler_func = cli_modular._load_command_parser("extract")
+
+    assert handler_func.__name__ == "handle_extraction_command"

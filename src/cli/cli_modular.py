@@ -127,7 +127,10 @@ def _load_command_parser(command: str) -> tuple[Callable, Callable] | None:
 
         # Prefer the module-level function that matches the command name
         preferred_add = f"add_{command.replace('-', '_')}_parser"
-        preferred_handle = f"handle_{command.replace('-', '_')}_command"
+        preferred_handle = COMMAND_HANDLER_ATTRS.get(command) or (
+            f"handle_{command.replace('-', '_')}_command"
+        )
+
         if hasattr(module, preferred_add):
             parser_func = getattr(module, preferred_add)
         else:
@@ -137,7 +140,7 @@ def _load_command_parser(command: str) -> tuple[Callable, Callable] | None:
                     parser_func = getattr(module, attr)
                     break
 
-        if hasattr(module, preferred_handle):
+        if preferred_handle and hasattr(module, preferred_handle):
             handler_func = getattr(module, preferred_handle)
         else:
             # Try to find handle_*_command function
