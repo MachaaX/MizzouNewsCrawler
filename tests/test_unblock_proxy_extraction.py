@@ -57,7 +57,7 @@ from sqlalchemy import text
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.crawler import ContentExtractor
+from src.crawler import ContentExtractor, UNBLOCK_MIN_HTML_BYTES
 from src.crawler.utils import mask_proxy_url
 from src.models import Source
 from src.utils.comprehensive_telemetry import ExtractionMetrics
@@ -388,7 +388,7 @@ class TestUnblockProxyMethod:
         </html>
         """
             * 100
-        )  # Make it large enough (>5000 bytes)
+        )  # Make it large enough (>UNBLOCK_MIN_HTML_BYTES bytes)
 
         with patch("requests.get", return_value=mock_response):
             result = extractor._extract_with_unblock_proxy("https://test.com/article")
@@ -397,7 +397,7 @@ class TestUnblockProxyMethod:
         assert result["content"] is not None
         assert result["metadata"]["extraction_method"] == "unblock_proxy"
         assert result["metadata"]["proxy_used"] is True
-        assert result["metadata"]["page_source_length"] > 5000
+        assert result["metadata"]["page_source_length"] > UNBLOCK_MIN_HTML_BYTES
 
     def test_blocked_response_returns_empty(self, mock_env_vars, monkeypatch):
         """Should return empty dict if still blocked by bot protection."""
@@ -419,7 +419,7 @@ class TestUnblockProxyMethod:
         assert result == {}
 
     def test_small_response_returns_empty(self, mock_env_vars, monkeypatch):
-        """Should return empty dict if response is too small (< 5000 bytes)."""
+        """Should return empty dict if response is below minimum size."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
@@ -624,7 +624,7 @@ class TestFieldLevelExtractionAndFallbacks:
         mock_post.status_code = 200
         mock_post.text = (
             "<html><head><title>OK</title></head><body>"
-            + ("x" * 5000)
+            + ("x" * UNBLOCK_MIN_HTML_BYTES)
             + "</body></html>"
         )
 

@@ -30,6 +30,8 @@ from .origin_proxy import enable_origin_proxy
 from .proxy_config import get_proxy_manager
 from .utils import mask_proxy_url
 
+UNBLOCK_MIN_HTML_BYTES = 3000
+
 
 class RateLimitError(Exception):
     """Exception raised when a domain is rate limited."""
@@ -2721,7 +2723,7 @@ class ContentExtractor:
                         "success"
                         if response
                         and response.status_code == 200
-                        and len(response.text or "") >= 5000
+                        and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
                         and "Access to this page has been denied"
                         not in (response.text or "")
                         else "failed"
@@ -2748,7 +2750,7 @@ class ContentExtractor:
                             "success"
                             if response
                             and response.status_code == 200
-                            and len(response.text or "") >= 5000
+                            and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
                             and "Access to this page has been denied"
                             not in (response.text or "")
                             else "failed"
@@ -2771,7 +2773,7 @@ class ContentExtractor:
                             "success"
                             if response
                             and response.status_code == 200
-                            and len(response.text or "") >= 5000
+                            and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
                             and "Access to this page has been denied"
                             not in (response.text or "")
                             else "failed"
@@ -2781,7 +2783,7 @@ class ContentExtractor:
                         "success"
                         if response
                         and response.status_code == 200
-                        and len(response.text or "") >= 5000
+                        and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
                         and "Access to this page has been denied"
                         not in (response.text or "")
                         else "failed"
@@ -2803,7 +2805,7 @@ class ContentExtractor:
             if (
                 response is None
                 or "Access to this page has been denied" in html
-                or html_len < 5000
+                or html_len < UNBLOCK_MIN_HTML_BYTES
             ):
                 logger.warning(
                     f"Unblock proxy may be blocked or returned small HTML for {url} ({html_len} bytes); attempting fallbacks"
@@ -2830,7 +2832,7 @@ class ContentExtractor:
                                 proxied_html = proxied_response.text
                                 if (
                                     proxied_response.status_code == 200
-                                    and len(proxied_html) >= 5000
+                                    and len(proxied_html) >= UNBLOCK_MIN_HTML_BYTES
                                     and "Access to this page has been denied"
                                     not in proxied_html
                                 ):
@@ -2855,7 +2857,7 @@ class ContentExtractor:
                                 )
 
                     # Fallback 2: Try Decodo API POST (even without browser_actions), using auth
-                    if response is None or len(html) < 5000:
+                    if response is None or len(html) < UNBLOCK_MIN_HTML_BYTES:
                         logger.info(f"Attempting Decodo API POST fallback for {url}")
                         try:
                             api_url = proxy_url_env
@@ -2869,7 +2871,7 @@ class ContentExtractor:
                             )
                             if (
                                 post_response.status_code == 200
-                                and len(post_response.text) >= 5000
+                                and len(post_response.text) >= UNBLOCK_MIN_HTML_BYTES
                                 and "Access to this page has been denied"
                                 not in post_response.text
                             ):
@@ -2893,7 +2895,7 @@ class ContentExtractor:
                     logger.debug(f"Unblock fallback attempts failed for {url}: {e}")
 
                 # After fallbacks, if nothing succeeded, return empty -> trigger Selenium fallback in caller
-                if response is None or len(html) < 5000:
+                if response is None or len(html) < UNBLOCK_MIN_HTML_BYTES:
                     # Update telemetry metrics to capture failed proxy usage
                     if metrics:
                         metrics.set_proxy_metrics(

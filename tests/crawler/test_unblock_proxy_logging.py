@@ -2,7 +2,7 @@ import logging
 import os
 from unittest.mock import Mock, patch
 
-from src.crawler import ContentExtractor
+from src.crawler import ContentExtractor, UNBLOCK_MIN_HTML_BYTES
 
 
 def test_unblock_proxy_does_not_log_password(caplog, monkeypatch):
@@ -16,7 +16,7 @@ def test_unblock_proxy_does_not_log_password(caplog, monkeypatch):
     # Simulate POST-first flow returning a large HTML (success)
     large_resp = Mock()
     large_resp.status_code = 200
-    large_resp.text = "<html>" + ("x" * 5000) + "</html>"
+    large_resp.text = "<html>" + ("x" * UNBLOCK_MIN_HTML_BYTES) + "</html>"
 
     caplog.set_level(logging.INFO)
     with patch("requests.post", return_value=large_resp):
