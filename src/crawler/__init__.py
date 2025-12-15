@@ -2733,9 +2733,7 @@ class ContentExtractor:
                 except Exception:
                     return proxy
 
-            # Primary request logic: prefer POST for Decodo API when configured
-            # Rationale: Decodo requires X-SU-* headers which the API POST receives
-            # directly; proxy GET via CONNECT may hide the header from the proxy.
+            # Primary request logic: fire CONNECT-style proxy first for reliability
             prefer_api_post = os.getenv(
                 "UNBLOCK_PREFER_API_POST", "true"
             ).strip().lower() in (
@@ -2743,6 +2741,7 @@ class ContentExtractor:
                 "true",
                 "yes",
             )
+
             response = None
             used_proxy_host = None
             used_proxy_provider = None
@@ -2750,98 +2749,100 @@ class ContentExtractor:
             used_proxy_authenticated = False
             used_proxy_status_str = None
 
-            try:
-                api_url = proxy_url_env
-                if browser_actions:
-                    # Use Decodo headless API in POST mode - include browser actions
-                    # auth tuple preferred over proxies for API interactions
-                    logger.debug("Using Decodo API POST mode for browser_actions")
-                    api_url = proxy_url_env
-                    response = requests.post(
-                        api_url,
-                        json={"url": url, "browser_actions": browser_actions},
+            def _mark_response(resp, provider, proxy_url_value, authenticated):
+                nonlocal used_proxy_host, used_proxy_provider, used_proxy_url
+                nonlocal used_proxy_authenticated, used_proxy_status_str
+
+                used_proxy_provider = provider
+                used_proxy_url = proxy_url_value
+                used_proxy_authenticated = authenticated
+                used_proxy_host = (
+                    urlparse(proxy_url_value).hostname
+                    if provider.startswith("unblock_api")
+                    else _host_from_proxy(proxy_url_value)
+                )
+
+                if resp is None:
+                    used_proxy_status_str = "failed"
+                else:
+                    status_ok = 200 <= resp.status_code < 300
+                    html = resp.text or ""
+                    long_enough = len(html) >= UNBLOCK_MIN_HTML_BYTES
+                    challenge = "Access to this page has been denied" in html
+                    used_proxy_status_str = (
+                        "success"
+                        if status_ok and long_enough and not challenge
+                        else "failed"
+                    )
+
+                return used_proxy_status_str == "success"
+
+            def _attempt_connect() -> bool:
+                nonlocal response
+                try:
+                    connect_resp = requests.get(
+                        url,
+                        headers=headers,
+                        proxies={"http": proxy_url, "https": proxy_url},
+                        verify=False,
+                        timeout=30,
+                    )
+                    response = connect_resp
+                    return _mark_response(
+                        connect_resp,
+                        "unblock_proxy",
+                        proxy_url,
+                        bool(proxy_user and proxy_pass),
+                    )
+                except (
+                    Exception
+                ) as exc:  # pragma: no cover - network errors exercised in test
+                    logger.warning(f"Decodo CONNECT attempt failed for {url}: {exc}")
+                    return False
+
+            def _attempt_api(payload: dict[str, object]) -> bool:
+                nonlocal response
+                try:
+                    api_resp = requests.post(
+                        proxy_url_env,
+                        json=payload,
                         headers=headers,
                         auth=(proxy_user, proxy_pass),
                         verify=False,
                         timeout=30,
                     )
-                    used_proxy_host = urlparse(api_url).hostname
-                    used_proxy_url = api_url
-                    used_proxy_authenticated = True
-                    # Consider 'success' only when 200 and reasonable HTML length
-                    used_proxy_status_str = (
-                        "success"
-                        if response
-                        and response.status_code == 200
-                        and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
-                        and "Access to this page has been denied"
-                        not in (response.text or "")
-                        else "failed"
+                    response = api_resp
+                    return _mark_response(
+                        api_resp,
+                        "unblock_api",  # provider string indicates API mode
+                        proxy_url_env,
+                        True,
                     )
-                    used_proxy_provider = "unblock_api"
-                else:
-                    if prefer_api_post:
-                        logger.debug(
-                            "Using Decodo API POST mode for primary GET-less attempt"
-                        )
-                        # Primary POST attempt (API mode) - no browser_actions
-                        response = requests.post(
-                            api_url,
-                            json={"url": url},
-                            headers=headers,
-                            auth=(proxy_user, proxy_pass),
-                            verify=False,
-                            timeout=30,
-                        )
-                        used_proxy_host = urlparse(api_url).hostname
-                        used_proxy_url = api_url
-                        used_proxy_authenticated = True
-                        used_proxy_status_str = (
-                            "success"
-                            if response
-                            and response.status_code == 200
-                            and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
-                            and "Access to this page has been denied"
-                            not in (response.text or "")
-                            else "failed"
-                        )
-                        used_proxy_provider = "unblock_api"
-                        # If POST attempt failed, we'll fall through to the existing
-                        # rotating DECODO and fallback POST logic below.
-                    else:
-                        response = requests.get(
-                            url,
-                            headers=headers,
-                            proxies={"http": proxy_url, "https": proxy_url},
-                            verify=False,
-                            timeout=30,
-                        )
-                        used_proxy_host = _host_from_proxy(proxy_url)
-                        used_proxy_url = proxy_url
-                        used_proxy_authenticated = bool(proxy_user and proxy_pass)
-                        used_proxy_status_str = (
-                            "success"
-                            if response
-                            and response.status_code == 200
-                            and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
-                            and "Access to this page has been denied"
-                            not in (response.text or "")
-                            else "failed"
-                        )
-                        used_proxy_provider = "unblock_proxy"
-                    used_proxy_status_str = (
-                        "success"
-                        if response
-                        and response.status_code == 200
-                        and len(response.text or "") >= UNBLOCK_MIN_HTML_BYTES
-                        and "Access to this page has been denied"
-                        not in (response.text or "")
-                        else "failed"
+                except Exception as exc:  # pragma: no cover - best-effort
+                    logger.warning(f"Decodo API POST attempt failed for {url}: {exc}")
+                    return False
+
+            success = False
+
+            # CONNECT attempt always runs first
+            success = _attempt_connect()
+
+            # Only try API mode when CONNECT failed or browser actions were requested
+            if not success:
+                if browser_actions:
+                    logger.debug(
+                        "CONNECT attempt failed; retrying Decodo API POST with browser_actions"
                     )
-            except (
-                Exception
-            ) as e:  # pragma: no cover - network errors exercised in test
-                logger.warning(f"Decodo primary request failed for {url}: {e}")
+                    success = _attempt_api(
+                        {"url": url, "browser_actions": browser_actions}
+                    )
+                elif prefer_api_post:
+                    logger.debug(
+                        "CONNECT attempt failed; retrying Decodo API POST as secondary"
+                    )
+                    success = _attempt_api({"url": url})
+
+            if not success and response is None:
                 response = None
 
             html = response.text if response is not None else ""

@@ -494,8 +494,18 @@ class TestUnblockProxyMethod:
         proxy_url = "https://decodo-user:secret@decodo.example:60000"
 
         def fake_get(url, **kwargs):
-            assert kwargs.get("proxies") is not None
-            return success_response
+            proxies = kwargs.get("proxies") or {}
+            https_proxy = proxies.get("https", "")
+
+            # First CONNECT attempt uses env-provided proxy (still blocked)
+            if "unblock.decodo.com" in https_proxy:
+                return challenge_response
+
+            # Rotating fallback uses the injected proxy and should succeed
+            if "decodo.example" in https_proxy:
+                return success_response
+
+            return challenge_response
 
         monkeypatch.setattr("requests.post", fake_post)
         monkeypatch.setattr("requests.get", fake_get)
@@ -587,10 +597,11 @@ class TestUnblockProxyMethod:
                     "https://test.com/article"
                 )
 
-                # Verify API POST was used as primary successful method
+                # Verify API POST was used as primary successful method after initial CONNECT attempt
                 assert result.get("metadata", {}).get("proxy_provider") == "unblock_api"
                 assert mock_post_fn.called
-                assert not mock_get_fn.call_count or mock_get_fn.call_count == 0
+                # CONNECT path still runs once before POST fallback
+                assert mock_get_fn.call_count == 1
                 post_headers = mock_post_fn.call_args[1]["headers"]
                 assert post_headers["Accept-Encoding"] == "identity"
 
@@ -763,8 +774,18 @@ class TestFieldLevelExtractionAndFallbacks:
         monkeypatch.setattr("requests.post", lambda *args, **kwargs: challenge_response)
 
         def fake_get(url, **kwargs):
-            assert kwargs.get("proxies") is not None
-            return proxied_response
+            proxies = kwargs.get("proxies") or {}
+            https_proxy = proxies.get("https", "")
+
+            # Initial CONNECT attempt should receive challenge to trigger API POST
+            if "unblock.decodo.com" in https_proxy:
+                return challenge_response
+
+            # Rotating proxy fallback uses injected proxy and succeeds
+            if "decodo.example" in https_proxy:
+                return proxied_response
+
+            return challenge_response
 
         monkeypatch.setattr("requests.get", fake_get)
 
