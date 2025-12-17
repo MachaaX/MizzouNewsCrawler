@@ -1168,9 +1168,15 @@ class BylineCleaner:
 
         # Normalize both strings for comparison
         def normalize_for_comparison(input_text: str) -> str:
-            """Normalize text for fuzzy comparison."""
-            # Convert to lowercase, remove extra spaces, punctuation
-            normalized = re.sub(r"[^\w\s]", " ", input_text.lower())
+            """Normalize text for fuzzy comparison.
+            
+            Note: Preserves hyphens in publication names like 'News-Leader'.
+            """
+            # Convert to lowercase
+            normalized = input_text.lower()
+            # Remove most punctuation, but keep hyphens
+            normalized = re.sub(r"[^\w\s-]", " ", normalized)
+            # Normalize spaces
             normalized = re.sub(r"\s+", " ", normalized).strip()
             return normalized
 

@@ -814,9 +814,10 @@ class TestFieldLevelExtractionAndFallbacks:
         assert call_kwargs["proxy_authenticated"] is True
 
     def test_post_api_fallback_used_when_gets_fail(self, mock_env_vars, monkeypatch):
-        """When UNBLOCK GET and rotating proxies fail, attempt Decodo API POST."""
+        """When UNBLOCK GET and rotating proxies fail, attempt Decodo API POST IF enabled."""
         extractor = ContentExtractor()
-        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
+        # Set to true to enable POST fallback
+        monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
 
         # First GET: small (blocked)
         mock_small = Mock()
