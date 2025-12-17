@@ -857,10 +857,7 @@ class TestFieldLevelExtractionAndFallbacks:
                     result.get("metadata", {}).get("extraction_method")
                     == "unblock_proxy"
                 )
-                assert (
-                    result.get("metadata", {}).get("proxy_provider")
-                    == "unblock_api"
-                )
+                assert result.get("metadata", {}).get("proxy_provider") == "unblock_api"
                 assert (
                     result.get("metadata", {}).get("proxy_url")
                     == "https://unblock.decodo.com:60000"
