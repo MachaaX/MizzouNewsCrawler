@@ -1170,7 +1170,7 @@ class BylineCleaner:
         def normalize_for_comparison(input_text: str) -> str:
             """Normalize text for fuzzy comparison."""
             # Convert to lowercase, remove extra spaces, punctuation
-            normalized = re.sub(r"[^\w\s]", "", input_text.lower())
+            normalized = re.sub(r"[^\w\s]", " ", input_text.lower())
             normalized = re.sub(r"\s+", " ", normalized).strip()
             return normalized
 
@@ -1994,6 +1994,7 @@ class BylineCleaner:
         separators = [
             r"\s*•\s*",
             r"\s*\|\s*",
+            r"\s*~\s*",
             r"\s*–\s*",
             r"\s*—\s*",
             r"\s*-\s*(?=\w+\s*\.|\.)",
@@ -2018,13 +2019,17 @@ class BylineCleaner:
                         for word in words
                         if word
                     )
-                    and all(
+                ):
+                    # Preserve original casing when available, otherwise
+                    # normalize to title case so lowercase bylines still pass.
+                    if not all(
                         word[0].isupper()
                         for word in words
                         if word and word[0].isalpha()
-                    )
-                ):
-                    cleaned_name = first_part
+                    ):
+                        cleaned_name = " ".join(word.title() for word in words)
+                    else:
+                        cleaned_name = first_part
                     break
 
         # Handle mixed person/organization cases
