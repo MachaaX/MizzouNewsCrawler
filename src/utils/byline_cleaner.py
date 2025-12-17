@@ -1168,9 +1168,15 @@ class BylineCleaner:
 
         # Normalize both strings for comparison
         def normalize_for_comparison(input_text: str) -> str:
-            """Normalize text for fuzzy comparison."""
-            # Convert to lowercase, remove extra spaces, punctuation
-            normalized = re.sub(r"[^\w\s]", "", input_text.lower())
+            """Normalize text for fuzzy comparison.
+
+            Note: Preserves hyphens in publication names like 'News-Leader'.
+            """
+            # Convert to lowercase
+            normalized = input_text.lower()
+            # Remove most punctuation, but keep hyphens
+            normalized = re.sub(r"[^\w\s-]", " ", normalized)
+            # Normalize spaces
             normalized = re.sub(r"\s+", " ", normalized).strip()
             return normalized
 
@@ -1243,10 +1249,15 @@ class BylineCleaner:
                 original_words = text.split()
                 remaining_words = []
 
+                # Normalize source words for comparison (remove all punctuation)
+                normalized_source_words = [
+                    re.sub(r"[^\w\s]", "", w.lower()) for w in source_words
+                ]
+
                 for word in original_words:
                     word_normalized = re.sub(r"[^\w\s]", "", word.lower())
                     # Skip this word if it matches any source word
-                    if word_normalized not in [w.lower() for w in source_words]:
+                    if word_normalized not in normalized_source_words:
                         remaining_words.append(word)
 
                 # Only return the remaining words if we have something left
@@ -1994,6 +2005,7 @@ class BylineCleaner:
         separators = [
             r"\s*•\s*",
             r"\s*\|\s*",
+            r"\s*~\s*",
             r"\s*–\s*",
             r"\s*—\s*",
             r"\s*-\s*(?=\w+\s*\.|\.)",
@@ -2008,23 +2020,21 @@ class BylineCleaner:
                 # Take the first part if it looks like a name
                 first_part = parts[0].strip()
                 words = first_part.split()
-                if (
-                    len(words) >= 2
-                    and all(
-                        word.replace(".", "")
-                        .replace("'", "")
-                        .replace("-", "")
-                        .isalpha()
-                        for word in words
-                        if word
-                    )
-                    and all(
+                if len(words) >= 2 and all(
+                    word.replace(".", "").replace("'", "").replace("-", "").isalpha()
+                    for word in words
+                    if word
+                ):
+                    # Preserve original casing when available, otherwise
+                    # normalize to title case so lowercase bylines still pass.
+                    if not all(
                         word[0].isupper()
                         for word in words
                         if word and word[0].isalpha()
-                    )
-                ):
-                    cleaned_name = first_part
+                    ):
+                        cleaned_name = " ".join(word.title() for word in words)
+                    else:
+                        cleaned_name = first_part
                     break
 
         # Handle mixed person/organization cases

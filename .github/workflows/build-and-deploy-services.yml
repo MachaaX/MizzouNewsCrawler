@@ -188,21 +188,28 @@ jobs:
   build-base:
     name: Build Base Image
     needs: detect-changes
-    if: needs.detect-changes.outputs.base == 'true'
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip base build (not requested)
+        if: needs.detect-changes.outputs.base != 'true'
+        run: 'echo "Info: Base image not requested; skipping Cloud Build trigger."'
+
       - uses: actions/checkout@v4
+        if: needs.detect-changes.outputs.base == 'true'
 
       - name: Authenticate to Google Cloud
+        if: needs.detect-changes.outputs.base == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: needs.detect-changes.outputs.base == 'true'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: Trigger Cloud Build
+        if: needs.detect-changes.outputs.base == 'true'
         run: |
           BUILD_ID=$(gcloud builds triggers run build-base-manual \
             --branch="${{ github.ref_name }}" \
@@ -220,23 +227,28 @@ jobs:
   build-ml-base:
     name: Build ML Base Image
     needs: [detect-changes, build-base]
-    if: |
-      needs.detect-changes.outputs.ml_base == 'true' &&
-      (needs.build-base.result == 'success' || needs.build-base.result == 'skipped')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip ml-base build (not requested)
+        if: needs.detect-changes.outputs.ml_base != 'true'
+        run: 'echo "Info: ML base image not requested; skipping Cloud Build trigger."'
+
       - uses: actions/checkout@v4
+        if: needs.detect-changes.outputs.ml_base == 'true'
 
       - name: Authenticate to Google Cloud
+        if: needs.detect-changes.outputs.ml_base == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: needs.detect-changes.outputs.ml_base == 'true'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: Trigger Cloud Build
+        if: needs.detect-changes.outputs.ml_base == 'true'
         run: |
           BUILD_ID=$(gcloud builds triggers run build-ml-base-manual \
             --branch="${{ github.ref_name }}" \
@@ -254,23 +266,28 @@ jobs:
   build-processor:
     name: Build Processor
     needs: [detect-changes, build-ml-base]
-    if: |
-      needs.detect-changes.outputs.processor == 'true' &&
-      (needs.build-ml-base.result == 'success' || needs.build-ml-base.result == 'skipped')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip processor build (not requested)
+        if: needs.detect-changes.outputs.processor != 'true'
+        run: 'echo "Info: Processor image not requested; skipping Cloud Build trigger."'
+
       - uses: actions/checkout@v4
+        if: needs.detect-changes.outputs.processor == 'true'
 
       - name: Authenticate to Google Cloud
+        if: needs.detect-changes.outputs.processor == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: needs.detect-changes.outputs.processor == 'true'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: Trigger Cloud Build
+        if: needs.detect-changes.outputs.processor == 'true'
         run: |
           BUILD_ID=$(gcloud builds triggers run build-processor-manual \
             --branch="${{ github.ref_name }}" \
@@ -288,23 +305,28 @@ jobs:
   build-api:
     name: Build API
     needs: [detect-changes, build-base]
-    if: |
-      needs.detect-changes.outputs.api == 'true' &&
-      (needs.build-base.result == 'success' || needs.build-base.result == 'skipped')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip API build (not requested)
+        if: needs.detect-changes.outputs.api != 'true'
+        run: 'echo "Info: API image not requested; skipping Cloud Build trigger."'
+
       - uses: actions/checkout@v4
+        if: needs.detect-changes.outputs.api == 'true'
 
       - name: Authenticate to Google Cloud
+        if: needs.detect-changes.outputs.api == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: needs.detect-changes.outputs.api == 'true'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: Trigger Cloud Build
+        if: needs.detect-changes.outputs.api == 'true'
         run: |
           BUILD_ID=$(gcloud builds triggers run build-api-manual \
             --branch="${{ github.ref_name }}" \
@@ -322,23 +344,28 @@ jobs:
   build-crawler:
     name: Build Crawler
     needs: [detect-changes, build-base]
-    if: |
-      needs.detect-changes.outputs.crawler == 'true' &&
-      (needs.build-base.result == 'success' || needs.build-base.result == 'skipped')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip crawler build (not requested)
+        if: needs.detect-changes.outputs.crawler != 'true'
+        run: 'echo "Info: Crawler image not requested; skipping Cloud Build trigger."'
+
       - uses: actions/checkout@v4
+        if: needs.detect-changes.outputs.crawler == 'true'
 
       - name: Authenticate to Google Cloud
+        if: needs.detect-changes.outputs.crawler == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: needs.detect-changes.outputs.crawler == 'true'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: Trigger Cloud Build
+        if: needs.detect-changes.outputs.crawler == 'true'
         run: |
           BUILD_ID=$(gcloud builds triggers run build-crawler-manual \
             --branch="${{ github.ref_name }}" \
@@ -356,23 +383,28 @@ jobs:
   build-migrator:
     name: Build Migrator
     needs: [detect-changes, build-base]
-    if: |
-      needs.detect-changes.outputs.migrator == 'true' &&
-      (needs.build-base.result == 'success' || needs.build-base.result == 'skipped')
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip migrator build (not requested)
+        if: needs.detect-changes.outputs.migrator != 'true'
+        run: 'echo "Info: Migrator image not requested; skipping Cloud Build trigger."'
+
       - uses: actions/checkout@v4
+        if: needs.detect-changes.outputs.migrator == 'true'
 
       - name: Authenticate to Google Cloud
+        if: needs.detect-changes.outputs.migrator == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: needs.detect-changes.outputs.migrator == 'true'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: Trigger Cloud Build
+        if: needs.detect-changes.outputs.migrator == 'true'
         run: |
           BUILD_ID=$(gcloud builds triggers run build-migrator-manual \
             --branch="${{ github.ref_name }}" \

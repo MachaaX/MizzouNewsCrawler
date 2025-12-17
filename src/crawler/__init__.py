@@ -677,6 +677,15 @@ class ContentExtractor:
             {}
         )  # Track consecutive errors per domain
 
+        try:
+            self.unblock_rate_limit_seconds = float(
+                os.getenv("UNBLOCK_RATE_LIMIT_SECONDS", "180")
+            )
+        except Exception:
+            self.unblock_rate_limit_seconds = 180.0
+        self._unblock_last_request_ts = 0.0
+        self._unblock_rate_limit_lock = threading.Lock()
+
         # Selenium-specific failure tracking (separate from requests failures)
         # This prevents disabling Selenium for CAPTCHA-protected domains
         self._selenium_failure_counts: dict[str, int] = (
@@ -1649,6 +1658,7 @@ class ContentExtractor:
                     metrics.end_method("newspaper4k", False, str(e), partial_result)
 
         # Check what fields are still missing
+        self._apply_cms_metadata_fallback(result)
         missing_fields = self._get_missing_fields(result)
 
         # Try BeautifulSoup fallback for missing fields
@@ -1688,6 +1698,7 @@ class ContentExtractor:
                     metrics.end_method("beautifulsoup", False, str(e), {})
 
         # Check what fields are still missing after BeautifulSoup
+        self._apply_cms_metadata_fallback(result)
         missing_fields = self._get_missing_fields(result)
 
         # For domains marked as 'unblock', use Decodo proxy instead of Selenium
@@ -1724,7 +1735,8 @@ class ContentExtractor:
                 if metrics:
                     metrics.end_method("unblock_proxy", False, str(e), {})
 
-        # Re-check missing fields after unblock attempt
+        # Re-check missing fields after unblock attempt (ensure CMS metadata applied)
+        self._apply_cms_metadata_fallback(result)
         missing_fields = self._get_missing_fields(result)
 
         # Try Selenium final fallback for remaining missing fields
@@ -1829,48 +1841,7 @@ class ContentExtractor:
                 metadata["wire_hints"] = deepcopy(self._latest_wire_hints)
 
         # Apply CMS metadata fallback for missing title/author
-        if self._latest_cms_metadata:
-            cms_meta = self._latest_cms_metadata
-            metadata = result.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-                result["metadata"] = metadata
-
-            # Fill in missing title from CMS data
-            if not result.get("title") and cms_meta.get("title"):
-                result["title"] = cms_meta["title"]
-                result["extraction_methods"][
-                    "title"
-                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
-                logger.info(
-                    "Title filled from CMS metadata (%s): %s",
-                    cms_meta.get("cms_source"),
-                    cms_meta["title"][:50] if cms_meta["title"] else None,
-                )
-
-            # Fill in missing author from CMS data
-            if not result.get("author") and cms_meta.get("author"):
-                result["author"] = cms_meta["author"]
-                result["extraction_methods"][
-                    "author"
-                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
-                logger.info(
-                    "Author filled from CMS metadata (%s): %s",
-                    cms_meta.get("cms_source"),
-                    cms_meta["author"],
-                )
-
-            # Fill in missing publish_date from CMS data
-            if not result.get("publish_date") and cms_meta.get("publish_date"):
-                result["publish_date"] = cms_meta["publish_date"]
-                result["extraction_methods"][
-                    "publish_date"
-                ] = f"cms_{cms_meta.get('cms_source', 'unknown')}"
-
-            # Store CMS metadata source in result metadata for debugging
-            metadata["cms_metadata_source"] = cms_meta.get("cms_source")
-            if cms_meta.get("category"):
-                metadata["cms_category"] = cms_meta["category"]
+        self._apply_cms_metadata_fallback(result)
 
         # Apply URL-based publish date fallback when all methods fail
         if not result.get("publish_date"):
@@ -2039,6 +2010,45 @@ class ContentExtractor:
                         f"Alternative {field} found by {method} "
                         f"but not used (current from previous method)"
                     )
+
+    def _apply_cms_metadata_fallback(self, result: Dict[str, Any]) -> None:
+        """Fill missing fields using CMS metadata captured during extraction."""
+        if not self._latest_cms_metadata:
+            return
+
+        cms_meta = self._latest_cms_metadata
+        metadata = result.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+            result["metadata"] = metadata
+
+        cms_source = cms_meta.get("cms_source", "unknown")
+
+        if not result.get("title") and cms_meta.get("title"):
+            result["title"] = cms_meta["title"]
+            result["extraction_methods"]["title"] = f"cms_{cms_source}"
+            logger.info(
+                "Title filled from CMS metadata (%s): %s",
+                cms_meta.get("cms_source"),
+                cms_meta["title"][:50] if cms_meta["title"] else None,
+            )
+
+        if not result.get("author") and cms_meta.get("author"):
+            result["author"] = cms_meta["author"]
+            result["extraction_methods"]["author"] = f"cms_{cms_source}"
+            logger.info(
+                "Author filled from CMS metadata (%s): %s",
+                cms_meta.get("cms_source"),
+                cms_meta["author"],
+            )
+
+        if not result.get("publish_date") and cms_meta.get("publish_date"):
+            result["publish_date"] = cms_meta["publish_date"]
+            result["extraction_methods"]["publish_date"] = f"cms_{cms_source}"
+
+        metadata["cms_metadata_source"] = cms_meta.get("cms_source")
+        if cms_meta.get("category"):
+            metadata["cms_category"] = cms_meta["category"]
 
     def _is_field_value_meaningful(self, field: str, value: Any) -> bool:
         """Check if a field value is meaningful (not empty/null/trivial)."""
@@ -2671,6 +2681,19 @@ class ContentExtractor:
             ).hexdigest()
             forwarded_for = ".".join(str(random.randint(1, 254)) for _ in range(4))
 
+            with self._unblock_rate_limit_lock:
+                now = time.time()
+                if self._unblock_last_request_ts > 0.0:
+                    wait = self.unblock_rate_limit_seconds - (
+                        now - self._unblock_last_request_ts
+                    )
+                    if wait > 0:
+                        logger.debug(
+                            f"Sleeping {wait:.2f}s to satisfy unblock proxy rate limit"
+                        )
+                        time.sleep(wait)
+                self._unblock_last_request_ts = time.time()
+
             user_agent_pool = [
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
@@ -2735,7 +2758,7 @@ class ContentExtractor:
 
             # Primary request logic: fire CONNECT-style proxy first for reliability
             prefer_api_post = os.getenv(
-                "UNBLOCK_PREFER_API_POST", "true"
+                "UNBLOCK_PREFER_API_POST", "false"
             ).strip().lower() in (
                 "1",
                 "true",
@@ -2841,6 +2864,10 @@ class ContentExtractor:
                         "CONNECT attempt failed; retrying Decodo API POST as secondary"
                     )
                     success = _attempt_api({"url": url})
+                else:
+                    logger.debug(
+                        "CONNECT attempt failed; skipping Decodo API POST because UNBLOCK_PREFER_API_POST is false"
+                    )
 
             if not success and response is None:
                 response = None
@@ -2910,37 +2937,45 @@ class ContentExtractor:
 
                     # Fallback 2: Try Decodo API POST (even without browser_actions), using auth
                     if response is None or len(html) < UNBLOCK_MIN_HTML_BYTES:
-                        logger.info(f"Attempting Decodo API POST fallback for {url}")
-                        try:
-                            api_url = proxy_url_env
-                            post_response = requests.post(
-                                api_url,
-                                json={"url": url},
-                                headers=headers,
-                                auth=(proxy_user, proxy_pass),
-                                verify=False,
-                                timeout=30,
+                        if prefer_api_post:
+                            logger.info(
+                                f"Attempting Decodo API POST fallback for {url}"
                             )
-                            if (
-                                post_response.status_code == 200
-                                and len(post_response.text) >= UNBLOCK_MIN_HTML_BYTES
-                                and "Access to this page has been denied"
-                                not in post_response.text
-                            ):
-                                response = post_response
-                                html = post_response.text
-                                html_len = len(html)
-                                used_proxy_host = urlparse(api_url).hostname
-                                used_proxy_url = api_url
-                                used_proxy_authenticated = True
-                                used_proxy_status_str = "success"
-                                used_proxy_provider = "unblock_api_post"
-                                logger.info(
-                                    f"Decodo API POST fallback succeeded for {url} (len={html_len})"
+                            try:
+                                api_url = proxy_url_env
+                                post_response = requests.post(
+                                    api_url,
+                                    json={"url": url},
+                                    headers=headers,
+                                    auth=(proxy_user, proxy_pass),
+                                    verify=False,
+                                    timeout=30,
                                 )
-                        except Exception as e:  # pragma: no cover
+                                if (
+                                    post_response.status_code == 200
+                                    and len(post_response.text)
+                                    >= UNBLOCK_MIN_HTML_BYTES
+                                    and "Access to this page has been denied"
+                                    not in post_response.text
+                                ):
+                                    response = post_response
+                                    html = post_response.text
+                                    html_len = len(html)
+                                    used_proxy_host = urlparse(api_url).hostname
+                                    used_proxy_url = api_url
+                                    used_proxy_authenticated = True
+                                    used_proxy_status_str = "success"
+                                    used_proxy_provider = "unblock_api_post"
+                                    logger.info(
+                                        f"Decodo API POST fallback succeeded for {url} (len={html_len})"
+                                    )
+                            except Exception as e:  # pragma: no cover
+                                logger.debug(
+                                    f"Decodo API POST fallback failed for {url}: {e}"
+                                )
+                        else:
                             logger.debug(
-                                f"Decodo API POST fallback failed for {url}: {e}"
+                                "Skipping Decodo API POST fallback because UNBLOCK_PREFER_API_POST is false"
                             )
 
                 except Exception as e:
