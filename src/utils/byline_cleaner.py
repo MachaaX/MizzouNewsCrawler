@@ -1169,7 +1169,7 @@ class BylineCleaner:
         # Normalize both strings for comparison
         def normalize_for_comparison(input_text: str) -> str:
             """Normalize text for fuzzy comparison.
-            
+
             Note: Preserves hyphens in publication names like 'News-Leader'.
             """
             # Convert to lowercase
