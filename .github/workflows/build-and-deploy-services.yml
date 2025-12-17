@@ -193,7 +193,7 @@ jobs:
     steps:
       - name: Skip base build (not requested)
         if: needs.detect-changes.outputs.base != 'true'
-        run: echo "Info: Base image not requested; skipping Cloud Build trigger."
+        run: 'echo "Info: Base image not requested; skipping Cloud Build trigger."'
 
       - uses: actions/checkout@v4
         if: needs.detect-changes.outputs.base == 'true'
@@ -232,7 +232,7 @@ jobs:
     steps:
       - name: Skip ml-base build (not requested)
         if: needs.detect-changes.outputs.ml_base != 'true'
-        run: echo "Info: ML base image not requested; skipping Cloud Build trigger."
+        run: 'echo "Info: ML base image not requested; skipping Cloud Build trigger."'
 
       - uses: actions/checkout@v4
         if: needs.detect-changes.outputs.ml_base == 'true'
@@ -271,7 +271,7 @@ jobs:
     steps:
       - name: Skip processor build (not requested)
         if: needs.detect-changes.outputs.processor != 'true'
-        run: echo "Info: Processor image not requested; skipping Cloud Build trigger."
+        run: 'echo "Info: Processor image not requested; skipping Cloud Build trigger."'
 
       - uses: actions/checkout@v4
         if: needs.detect-changes.outputs.processor == 'true'
@@ -310,7 +310,7 @@ jobs:
     steps:
       - name: Skip API build (not requested)
         if: needs.detect-changes.outputs.api != 'true'
-        run: echo "Info: API image not requested; skipping Cloud Build trigger."
+        run: 'echo "Info: API image not requested; skipping Cloud Build trigger."'
 
       - uses: actions/checkout@v4
         if: needs.detect-changes.outputs.api == 'true'
@@ -349,7 +349,7 @@ jobs:
     steps:
       - name: Skip crawler build (not requested)
         if: needs.detect-changes.outputs.crawler != 'true'
-        run: echo "Info: Crawler image not requested; skipping Cloud Build trigger."
+        run: 'echo "Info: Crawler image not requested; skipping Cloud Build trigger."'
 
       - uses: actions/checkout@v4
         if: needs.detect-changes.outputs.crawler == 'true'
@@ -388,7 +388,7 @@ jobs:
     steps:
       - name: Skip migrator build (not requested)
         if: needs.detect-changes.outputs.migrator != 'true'
-        run: echo "Info: Migrator image not requested; skipping Cloud Build trigger."
+        run: 'echo "Info: Migrator image not requested; skipping Cloud Build trigger."'
 
       - uses: actions/checkout@v4
         if: needs.detect-changes.outputs.migrator == 'true'
