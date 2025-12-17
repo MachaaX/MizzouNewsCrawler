@@ -220,7 +220,9 @@ def extract(
     if "canonical_url" in overrides:
         canonical_url = overrides["canonical_url"]
     else:
-        canonical_url = article.get("canonical_url")
+        canonical_url = struct_data.get("canonical_url") or article.get(
+            "canonical_url"
+        )
 
     total_duration = time.monotonic() - t0
     accumulator["total"] += total_duration

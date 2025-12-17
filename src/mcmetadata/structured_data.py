@@ -132,6 +132,7 @@ def extract_from_html(html_text: str, url: str | None = None) -> dict[str, Any]:
         "description": None,
         "source": None,
         "wire_signals": None,
+        "canonical_url": None,
     }
 
     # =========================================================================
@@ -175,18 +176,22 @@ def extract_from_html(html_text: str, url: str | None = None) -> dict[str, Any]:
     # =========================================================================
     # 3. Canonical URL check for cross-domain wire detection
     # =========================================================================
-    if url:
-        canonical_signals = _check_canonical_for_wire(html_text, url)
-        if canonical_signals:
-            if result["wire_signals"]:
-                result["wire_signals"]["detection_methods"].extend(
-                    canonical_signals.get("detection_methods", [])
-                )
-                result["wire_signals"]["services"].extend(
-                    canonical_signals.get("services", [])
-                )
-            else:
-                result["wire_signals"] = canonical_signals
+    canonical_url = _extract_canonical_url(html_text)
+    if canonical_url:
+        result["canonical_url"] = canonical_url
+
+        if url:
+            canonical_signals = _check_canonical_for_wire(canonical_url, url)
+            if canonical_signals:
+                if result["wire_signals"]:
+                    result["wire_signals"]["detection_methods"].extend(
+                        canonical_signals.get("detection_methods", [])
+                    )
+                    result["wire_signals"]["services"].extend(
+                        canonical_signals.get("services", [])
+                    )
+                else:
+                    result["wire_signals"] = canonical_signals
 
     return result
 
@@ -198,7 +203,36 @@ def _extract_from_jsonld(html_text: str) -> dict[str, Any] | None:
     for match in _JSONLD_BLOCK_RE.finditer(html_text):
         try:
             data = json.loads(match.group(1))
-            items = data if isinstance(data, list) else [data]
+
+            primary_items: list[Any] = []
+            fallback_items: list[Any] = []
+
+            def _append_candidate(candidate: Any) -> None:
+                if not isinstance(candidate, dict):
+                    return
+                item_type = candidate.get("@type", "")
+                if isinstance(item_type, list):
+                    item_type = item_type[0] if item_type else ""
+                item_type_lower = item_type.lower() if isinstance(item_type, str) else ""
+
+                if item_type_lower and item_type_lower in ARTICLE_TYPES and item_type_lower != "webpage":
+                    primary_items.append(candidate)
+                else:
+                    fallback_items.append(candidate)
+
+            if isinstance(data, list):
+                for candidate in data:
+                    _append_candidate(candidate)
+            elif isinstance(data, dict):
+                _append_candidate(data)
+                graph_items = data.get("@graph")
+                if isinstance(graph_items, list):
+                    for candidate in graph_items:
+                        _append_candidate(candidate)
+            else:
+                continue
+
+            items: list[Any] = primary_items + fallback_items
 
             for item in items:
                 if not isinstance(item, dict):
@@ -279,7 +313,7 @@ def _extract_author_from_jsonld_field(author: Any) -> str | None:
                 if name and isinstance(name, str):
                     names.append(name.strip())
         if names:
-            return "; ".join(names)
+            return ", ".join(names)
     return None
 
 
@@ -392,19 +426,10 @@ def _check_meta_tags_for_wire(html_text: str) -> dict[str, Any] | None:
 
 
 def _check_canonical_for_wire(
-    html_text: str, article_url: str
+    canonical_url: str, article_url: str
 ) -> dict[str, Any] | None:
     """Check if canonical URL points to a different wire service domain."""
     from urllib.parse import urlparse
-
-    # Get canonical URL
-    match = _CANONICAL_LINK_RE.search(html_text)
-    if not match:
-        match = _CANONICAL_LINK_ALT_RE.search(html_text)
-    if not match:
-        return None
-
-    canonical_url = match.group(1).strip()
 
     try:
         canonical_parsed = urlparse(canonical_url)
@@ -446,3 +471,11 @@ def _check_canonical_for_wire(
         pass
 
     return None
+
+
+def _extract_canonical_url(html_text: str) -> str | None:
+    """Extract canonical URL from link tags in the HTML."""
+    match = _CANONICAL_LINK_RE.search(html_text)
+    if not match:
+        match = _CANONICAL_LINK_ALT_RE.search(html_text)
+    return match.group(1).strip() if match else None
