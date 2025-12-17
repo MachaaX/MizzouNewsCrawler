@@ -2009,16 +2009,10 @@ class BylineCleaner:
                 # Take the first part if it looks like a name
                 first_part = parts[0].strip()
                 words = first_part.split()
-                if (
-                    len(words) >= 2
-                    and all(
-                        word.replace(".", "")
-                        .replace("'", "")
-                        .replace("-", "")
-                        .isalpha()
-                        for word in words
-                        if word
-                    )
+                if len(words) >= 2 and all(
+                    word.replace(".", "").replace("'", "").replace("-", "").isalpha()
+                    for word in words
+                    if word
                 ):
                     # Preserve original casing when available, otherwise
                     # normalize to title case so lowercase bylines still pass.

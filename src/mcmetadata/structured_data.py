@@ -213,9 +213,15 @@ def _extract_from_jsonld(html_text: str) -> dict[str, Any] | None:
                 item_type = candidate.get("@type", "")
                 if isinstance(item_type, list):
                     item_type = item_type[0] if item_type else ""
-                item_type_lower = item_type.lower() if isinstance(item_type, str) else ""
+                item_type_lower = (
+                    item_type.lower() if isinstance(item_type, str) else ""
+                )
 
-                if item_type_lower and item_type_lower in ARTICLE_TYPES and item_type_lower != "webpage":
+                if (
+                    item_type_lower
+                    and item_type_lower in ARTICLE_TYPES
+                    and item_type_lower != "webpage"
+                ):
                     primary_items.append(candidate)
                 else:
                     fallback_items.append(candidate)
