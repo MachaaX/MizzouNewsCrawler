@@ -1248,11 +1248,16 @@ class BylineCleaner:
                 # formatting
                 original_words = text.split()
                 remaining_words = []
+                
+                # Normalize source words for comparison (remove all punctuation)
+                normalized_source_words = [
+                    re.sub(r"[^\w\s]", "", w.lower()) for w in source_words
+                ]
 
                 for word in original_words:
                     word_normalized = re.sub(r"[^\w\s]", "", word.lower())
                     # Skip this word if it matches any source word
-                    if word_normalized not in [w.lower() for w in source_words]:
+                    if word_normalized not in normalized_source_words:
                         remaining_words.append(word)
 
                 # Only return the remaining words if we have something left
