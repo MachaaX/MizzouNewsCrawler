@@ -213,13 +213,13 @@ jobs:
         run: |
           BUILD_ID=$(gcloud builds triggers run build-base-manual \
             --branch="${{ github.ref_name }}" \
-            --project=${{ secrets.GCP_PROJECT }} \
+            --project=$GCP_PROJECT \
             --format="value(metadata.build.id)" 2>/dev/null)
           if [ -z "$BUILD_ID" ]; then
             echo "❌ Failed to trigger base image build"
             gcloud builds triggers run build-base-manual \
               --branch="${{ github.ref_name }}" \
-              --project=${{ secrets.GCP_PROJECT }}
+              --project=$GCP_PROJECT
             exit 1
           fi
           echo "✅ Base image build triggered (build ID: $BUILD_ID)"
@@ -252,13 +252,13 @@ jobs:
         run: |
           BUILD_ID=$(gcloud builds triggers run build-ml-base-manual \
             --branch="${{ github.ref_name }}" \
-            --project=${{ secrets.GCP_PROJECT }} \
+            --project=$GCP_PROJECT \
             --format="value(metadata.build.id)" 2>/dev/null)
           if [ -z "$BUILD_ID" ]; then
             echo "❌ Failed to trigger ml-base image build"
             gcloud builds triggers run build-ml-base-manual \
               --branch="${{ github.ref_name }}" \
-              --project=${{ secrets.GCP_PROJECT }}
+              --project=$GCP_PROJECT
             exit 1
           fi
           echo "✅ ML base image build triggered (build ID: $BUILD_ID)"
@@ -291,13 +291,13 @@ jobs:
         run: |
           BUILD_ID=$(gcloud builds triggers run build-processor-manual \
             --branch="${{ github.ref_name }}" \
-            --project=${{ secrets.GCP_PROJECT }} \
+            --project=$GCP_PROJECT \
             --format="value(metadata.build.id)" 2>/dev/null)
           if [ -z "$BUILD_ID" ]; then
             echo "❌ Failed to trigger processor build"
             gcloud builds triggers run build-processor-manual \
               --branch="${{ github.ref_name }}" \
-              --project=${{ secrets.GCP_PROJECT }}
+              --project=$GCP_PROJECT
             exit 1
           fi
           echo "✅ Processor build triggered (build ID: $BUILD_ID)"
@@ -330,13 +330,13 @@ jobs:
         run: |
           BUILD_ID=$(gcloud builds triggers run build-api-manual \
             --branch="${{ github.ref_name }}" \
-            --project=${{ secrets.GCP_PROJECT }} \
+            --project=$GCP_PROJECT \
             --format="value(metadata.build.id)" 2>/dev/null)
           if [ -z "$BUILD_ID" ]; then
             echo "❌ Failed to trigger API build"
             gcloud builds triggers run build-api-manual \
               --branch="${{ github.ref_name }}" \
-              --project=${{ secrets.GCP_PROJECT }}
+              --project=$GCP_PROJECT
             exit 1
           fi
           echo "✅ API build triggered (build ID: $BUILD_ID)"
@@ -369,13 +369,13 @@ jobs:
         run: |
           BUILD_ID=$(gcloud builds triggers run build-crawler-manual \
             --branch="${{ github.ref_name }}" \
-            --project=${{ secrets.GCP_PROJECT }} \
+            --project=$GCP_PROJECT \
             --format="value(metadata.build.id)" 2>/dev/null)
           if [ -z "$BUILD_ID" ]; then
             echo "❌ Failed to trigger crawler build"
             gcloud builds triggers run build-crawler-manual \
               --branch="${{ github.ref_name }}" \
-              --project=${{ secrets.GCP_PROJECT }}
+              --project=$GCP_PROJECT
             exit 1
           fi
           echo "✅ Crawler build triggered (build ID: $BUILD_ID)"
@@ -408,13 +408,13 @@ jobs:
         run: |
           BUILD_ID=$(gcloud builds triggers run build-migrator-manual \
             --branch="${{ github.ref_name }}" \
-            --project=${{ secrets.GCP_PROJECT }} \
+            --project=$GCP_PROJECT \
             --format="value(metadata.build.id)" 2>/dev/null)
           if [ -z "$BUILD_ID" ]; then
             echo "❌ Failed to trigger migrator build"
             gcloud builds triggers run build-migrator-manual \
               --branch="${{ github.ref_name }}" \
-              --project=${{ secrets.GCP_PROJECT }}
+              --project=$GCP_PROJECT
             exit 1
           fi
           echo "✅ Migrator build triggered (build ID: $BUILD_ID)"
@@ -452,7 +452,7 @@ jobs:
           # Get the 10 most recent builds in the last 10 minutes
           # Filter by status != SUCCESS to find in-progress builds
           gcloud builds list \
-            --project=${{ secrets.GCP_PROJECT }} \
+            --project=$GCP_PROJECT \
             --limit=50 \
             --filter="createTime>'-10m' AND (status=QUEUED OR status=WORKING)" \
             --format="value(id,status,startTime)" > /tmp/builds.txt
@@ -477,7 +477,7 @@ jobs:
             
             for BUILD_ID in $BUILD_IDS; do
               STATUS=$(gcloud builds describe "$BUILD_ID" \
-                --project=${{ secrets.GCP_PROJECT }} \
+                --project=$GCP_PROJECT \
                 --format='value(status)')
               
               case $STATUS in
