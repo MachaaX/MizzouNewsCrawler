@@ -1248,7 +1248,7 @@ class BylineCleaner:
                 # formatting
                 original_words = text.split()
                 remaining_words = []
-                
+
                 # Normalize source words for comparison (remove all punctuation)
                 normalized_source_words = [
                     re.sub(r"[^\w\s]", "", w.lower()) for w in source_words

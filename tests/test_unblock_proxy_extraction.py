@@ -859,7 +859,7 @@ class TestFieldLevelExtractionAndFallbacks:
                 )
                 assert (
                     result.get("metadata", {}).get("proxy_provider")
-                    == "unblock_api_post"
+                    == "unblock_api"
                 )
                 assert (
                     result.get("metadata", {}).get("proxy_url")
