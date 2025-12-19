@@ -507,6 +507,19 @@ class URLVerificationService:
             "pattern_id": None,
         }
 
+        # Stage -1: Check for opinion URLs (highest priority, no extraction needed)
+        if "/opinion/" in url.lower():
+            result["storysniffer_result"] = False
+            result["pattern_filtered"] = True
+            result["pattern_status"] = "opinion"
+            result["pattern_type"] = "opinion"
+            result["verification_time_ms"] = (time.time() - start_time) * 1000
+            self.logger.debug(
+                f"Filtered opinion URL: {url} "
+                f"({result['verification_time_ms']:.1f}ms)"
+            )
+            return result
+
         # Stage 0: Check for wire service URLs (highest priority)
         from src.utils.content_type_detector import ContentTypeDetector
 

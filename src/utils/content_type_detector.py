@@ -462,8 +462,18 @@ class ContentTypeDetector:
         metadata: dict | None,
         content: str | None = None,
         author: str | None = None,
+        raw_html: str | None = None,
     ) -> ContentTypeResult | None:
-        """Return the detected content type for the article, if any."""
+        """Return the detected content type for the article, if any.
+        
+        Args:
+            url: Article URL
+            title: Article title
+            metadata: Article metadata dict
+            content: Cleaned article text (from newspaper4k)
+            author: Article author/byline
+            raw_html: Raw HTML (preferred for cross-publication detection)
+        """
 
         normalized_metadata = metadata or {}
         keywords = self._normalize_keywords(normalized_metadata.get("keywords"))
@@ -476,6 +486,7 @@ class ContentTypeDetector:
             metadata=normalized_metadata,
             author=author,
             title=title,
+            raw_html=raw_html,
         )
         if wire_result:
             return wire_result
@@ -505,6 +516,7 @@ class ContentTypeDetector:
         metadata: dict | None = None,
         author: str | None = None,
         title: str | None = None,
+        raw_html: str | None = None,
     ) -> ContentTypeResult | None:
         """
         Detect wire service content using tiered detection strategy.
@@ -515,6 +527,9 @@ class ContentTypeDetector:
            - CRITICAL: Excludes if byline matches publisher (KMIZ on KMIZ = local)
         3. Metadata/Copyright (STRONG): Structured attribution, copyright notices
         4. Content Patterns (WEAK): Dateline patterns, requires additional evidence
+
+        Args:
+            raw_html: Raw HTML (preferred for cross-publication bio detection)
 
         Returns wire detection only with strong evidence. Avoids false positives
         from local reporters filing from DC or articles that merely cite sources.
@@ -641,16 +656,19 @@ class ContentTypeDetector:
         # Check for cross-publication author bio (content-based detection)
         # Example: "Nick Harris is the reporter for the Fort Worth
         # Star-Telegram" on kansascity.com indicates syndication
-        if content and not byline_signal:
-            cross_pub_result = self._detect_cross_publication_byline(content, url_lower)
-            if cross_pub_result:
-                publication_name, is_syndicated = cross_pub_result
-                if is_syndicated:
-                    matches.setdefault("author", []).append(
-                        f"{publication_name} (cross-publication byline)"
-                    )
-                    detected_services.add(publication_name)
-                    byline_signal = True
+        # Prefer raw HTML (has author bios) over cleaned content
+        if not byline_signal:
+            search_text = raw_html if raw_html else content
+            if search_text:
+                cross_pub_result = self._detect_cross_publication_byline(search_text, url_lower)
+                if cross_pub_result:
+                    publication_name, is_syndicated = cross_pub_result
+                    if is_syndicated:
+                        matches.setdefault("author", []).append(
+                            f"{publication_name} (cross-publication byline, raw_html={bool(raw_html)})"
+                        )
+                        detected_services.add(publication_name)
+                        byline_signal = True
 
         # Byline signal is strong enough alone
         if byline_signal:
@@ -708,10 +726,22 @@ class ContentTypeDetector:
         # ===================================================================
         copyright_signal = False
 
+        # Check both cleaned content footer AND raw HTML footer for copyright/attribution
+        # Raw HTML often contains "Powered by", copyright notices that are stripped
+        search_sections = []
+        
         if content:
-            # Check last 150 chars for copyright
+            # Check last 150 chars of cleaned content
             closing = content[-150:] if len(content) > 150 else content
+            search_sections.append(("cleaned_content", closing))
+        
+        if raw_html:
+            # Check last 1000 chars of raw HTML for footer attributions
+            # (e.g., "Powered by Daypop", copyright notices)
+            html_footer = raw_html[-1000:] if len(raw_html) > 1000 else raw_html
+            search_sections.append(("raw_html_footer", html_footer))
 
+        if search_sections:
             # Build copyright pattern dynamically from database
             # Get all unique service names for copyright detection
             wire_services = self._get_wire_service_patterns(pattern_type="author")
@@ -730,14 +760,19 @@ class ContentTypeDetector:
                     rf"Copyright\s+\d{{4}}\s+(?:The\s+)?({services_pattern})",
                 ]
 
-                for pattern in copyright_patterns:
-                    match = re.search(pattern, closing, re.IGNORECASE)
-                    if match:
-                        service = self._normalize_service_name(match.group(1))
-                        matches.setdefault("copyright", []).append(service)
-                        detected_services.add(service)
-                        copyright_signal = True
-                        break  # Found copyright, no need to check other patterns
+                for section_name, section_text in search_sections:
+                    if copyright_signal:
+                        break
+                    for pattern in copyright_patterns:
+                        match = re.search(pattern, section_text, re.IGNORECASE)
+                        if match:
+                            service = self._normalize_service_name(match.group(1))
+                            matches.setdefault("copyright", []).append(
+                                f"{service} ({section_name})"
+                            )
+                            detected_services.add(service)
+                            copyright_signal = True
+                            break  # Found copyright, no need to check other patterns
 
         # Don't return yet - continue collecting evidence from all tiers
 
@@ -784,30 +819,46 @@ class ContentTypeDetector:
         # ===================================================================
         content_signal = False
 
+        # Search in both cleaned content (first 300 chars for datelines) 
+        # AND raw HTML footer (last 1000 chars for attribution)
+        content_search_sections = []
+        
         if content:
             # Strip common navigation/menu boilerplate before analysis
             # Many sites have extensive menus before article content starts
             cleaned_content = self._strip_boilerplate_for_wire_detection(content)
             content_start = cleaned_content[:300]
+            content_search_sections.append(("dateline", content_start))
             content_start_lower = content_start.lower()
+        
+        if raw_html:
+            # Also check HTML footer for "Powered by", attribution patterns
+            html_footer = raw_html[-1000:] if len(raw_html) > 1000 else raw_html
+            content_search_sections.append(("footer_attribution", html_footer))
 
+        if content_search_sections:
             # Load content patterns from database
             wire_content_patterns = self._get_wire_service_patterns(
                 pattern_type="content"
             )
 
-            for pattern, service_name, case_sensitive in wire_content_patterns:
-                flags = 0 if case_sensitive else re.IGNORECASE
-                if re.search(pattern, content_start, flags):
-                    matches.setdefault("content", []).append(
-                        f"{service_name} (dateline)"
-                    )
-                    detected_services.add(service_name)
-                    content_signal = True
+            for section_name, section_text in content_search_sections:
+                if content_signal:
+                    break
+                for pattern, service_name, case_sensitive in wire_content_patterns:
+                    flags = 0 if case_sensitive else re.IGNORECASE
+                    if re.search(pattern, section_text, flags):
+                        matches.setdefault("content", []).append(
+                            f"{service_name} ({section_name})"
+                        )
+                        detected_services.add(service_name)
+                        content_signal = True
+                        break
 
-            # ===================================================================
-            # BROADCASTER DATELINE DETECTION
-            # ===================================================================
+        # ===================================================================
+        # BROADCASTER DATELINE DETECTION (only check cleaned content start)
+        # ===================================================================
+        if content:
             # Check for local broadcaster datelines (e.g., "(KMIZ)") and
             # determine if they are syndicated (wire) or local content
             broadcaster_result = self._detect_broadcaster_dateline(
