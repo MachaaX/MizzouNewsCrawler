@@ -1,12 +1,47 @@
 # GitHub Copilot Instructions
 
+## System Architecture Overview
+
+MizzouNewsCrawler is a **cloud-native news discovery and analysis pipeline** running on Google Kubernetes Engine (GKE) with microservices architecture.
+
+### Core Services (Kubernetes Deployments)
+
+1. **API Service** (`mizzou-api`): FastAPI backend exposing telemetry, admin endpoints, and web data (1 replica, LoadBalancer)
+2. **Processor Service** (`mizzou-processor`): Continuous background processor for cleaning, ML analysis, and entity extraction (1 replica)
+3. **Argo Workflows**: Orchestrates discovery, verification, and extraction jobs via CronWorkflow (every 6 hours)
+
+### Data Pipeline Flow
+
+```
+RSS/Sitemaps → Discovery (Argo) → candidate_links (status='discovered')
+              ↓
+Verification (Argo) → StorySniffer validation → status='article'
+              ↓
+Extraction (Argo) → fetch article content → articles (status='extracted')
+              ↓
+Cleaning (Processor) → remove boilerplate → status='cleaned'
+              ↓
+ML Analysis (Processor) → CIN classification → status='labeled' + article_labels
+              ↓
+Entity Extraction (Processor) → gazetteer NER → locations table
+              ↓
+BigQuery Export → analytics datasets
+```
+
+### Infrastructure
+
+- **Database**: Cloud SQL PostgreSQL (`mizzou-db-prod`) via Cloud SQL Connector (no proxy sidecar)
+- **Container Registry**: Artifact Registry (`us-central1-docker.pkg.dev/mizzou-news-crawler`)
+- **Build System**: Cloud Build with selective service detection (only rebuilds changed services)
+- **Orchestration**: Argo Workflows with dataset-specific CronWorkflows
+
 ## Database Query Protocol
 
 ### Production Database Access (PostgreSQL via Cloud SQL)
 
-**URGENT: ALWAYS use `kubectl exec` to query production data. The local environment DOES NOT connect to production.**
+**CRITICAL: ALWAYS use `kubectl exec` to query production data. The local environment DOES NOT connect to production.**
 
-To query the production database, you must execute the Python script inside a running pod (API or Processor) in the `production` namespace.
+To query the production database, execute Python scripts inside a running pod (API or Processor) in the `production` namespace.
 
 ```bash
 # Standard query pattern (USE THIS):
@@ -53,16 +88,444 @@ results = session.execute(text('''
 
 **Key Schema Reference:**
 
-- `candidate_links`: Discovered URLs (id, url, source, status, discovered_at, candidate_link_id FK)
+- `candidate_links`: Discovered URLs (id, url, source, status, discovered_at, source_id FK)
+  - Status progression: `new` → `discovered` → `article` → article extraction
 - `articles`: Extracted content (id, candidate_link_id FK, url, title, author, text, extracted_at)
+  - Status progression: `extracted` → `cleaned` → `labeled`
 - `sources`: Publishers (id, host, canonical_name, city, county, status)
 - `article_entities`: NER results (article_id FK, entity_text, entity_type, extractor_version)
 - `article_labels`: ML classifications (article_id FK, label, confidence, label_version)
 
 **NEVER:**
-- **NEVER** assume the local `venv` connects to the production database. It connects to a local SQLite or empty Postgres instance.
-- **NEVER** run queries locally expecting production results.
+- **NEVER** assume the local `venv` connects to production database (it uses local SQLite/empty Postgres)
+- **NEVER** run local queries expecting production results
 - Don't forget `text()` wrapper for raw SQL in SQLAlchemy
+
+## Development Workflows
+
+### Build & Deployment System
+
+**Selective Service Builds**: The CI/CD pipeline intelligently rebuilds only changed services (60% faster, 50-83% cost reduction).
+
+**Build dependency hierarchy:**
+```
+Dockerfile.base (Python, system deps) → ALL services depend on this
+    ↓
+Dockerfile.ml-base (PyTorch, transformers) → Only processor depends on this
+    ↓
+Service-specific Dockerfiles:
+    - Dockerfile.api (FastAPI, backend dependencies)
+    - Dockerfile.crawler (Selenium, ChromeDriver)
+    - Dockerfile.processor (ML models, NER tools)
+```
+
+**Deployment commands (from local dev):**
+
+```bash
+# Deploy specific services to GKE (triggers Cloud Build + Cloud Deploy)
+./scripts/deploy-services.sh main api processor
+
+# Deploy all services (full rebuild: base → ml-base → api/crawler/processor)
+./scripts/deploy-services.sh main all
+
+# Deploy only CI/CD services (api, crawler, processor - skips base images)
+./scripts/deploy-services.sh main ci
+
+# Test what would be rebuilt from your current changes
+./scripts/test-selective-build.sh origin/main HEAD
+```
+
+**VS Code tasks available** (see tasks in workspace):
+- `GCP: Build & Deploy API/Crawler/Processor` - Individual service builds
+- `GCP: Build & Deploy All Services` - Full rebuild
+- `Argo: Submit Workflow` - Manually trigger pipeline
+
+### Testing Strategy
+
+**Three test environments:**
+1. **Unit tests**: Fast, no database (`-m "not integration and not postgres"`)
+2. **Integration tests (SQLite)**: In-memory SQLite, fast setup
+3. **PostgreSQL integration tests**: Docker container with PostgreSQL 15
+
+**Critical pytest markers:**
+- `@pytest.mark.integration`: Runs in postgres-integration job (requires cloud_sql_session fixture)
+- `@pytest.mark.postgres`: PostgreSQL-specific syntax (FOR UPDATE SKIP LOCKED, etc.)
+- `@pytest.mark.e2e`: End-to-end smoke tests in production
+- `@pytest.mark.slow`: Tests >5 seconds (deselected by default)
+
+**Running tests locally:**
+
+```bash
+# Full CI suite (matches GitHub Actions exactly)
+make test-ci
+
+# Unit tests only (fast)
+make test-unit
+
+# PostgreSQL integration tests (requires Docker)
+make test-postgres
+
+# Run smoke tests against production
+./scripts/run-production-smoke-tests.sh
+```
+
+### CLI Command Structure
+
+**All pipeline commands use modular CLI** (`src/cli/cli_modular.py`):
+
+```bash
+# Discovery commands
+python -m src.cli.cli_modular discover-urls [--force-all]
+python -m src.cli.cli_modular discovery-status [--hours 24]
+
+# Processing commands
+python -m src.cli.cli_modular verify-urls --batch-size 10
+python -m src.cli.cli_modular extract --limit 20
+python -m src.cli.cli_modular clean-articles --batch-size 50
+python -m src.cli.cli_modular analyze --batch-size 16
+python -m src.cli.cli_modular extract-entities --batch-size 500
+
+# Monitoring commands
+python -m src.cli.cli_modular pipeline-status --hours 24
+python -m src.cli.cli_modular telemetry --interval 60
+
+# Source management
+python -m src.cli.cli_modular load-sources --file sources/mizzou_sources.csv
+python -m src.cli.cli_modular list-sources [--county Boone]
+```
+
+**Feature flags in processor** (`orchestration/continuous_processor.py`):
+- `ENABLE_DISCOVERY=false` (default: Argo handles this)
+- `ENABLE_VERIFICATION=false` (default: Argo handles this)
+- `ENABLE_EXTRACTION=false` (default: Argo handles this)
+- `ENABLE_CLEANING=true` (processor handles article cleaning)
+- `ENABLE_ML_ANALYSIS=true` (processor handles CIN classification)
+- `ENABLE_ENTITY_EXTRACTION=true` (processor handles gazetteer NER)
+- `ENABLE_WIRE_DETECTION=true` (processor handles wire service detection)
+
+## Integration Points & Cross-Component Patterns
+
+### MediaCloud Wire Detection
+
+**Purpose**: Identify syndicated/wire service content to exclude from local news analysis.
+
+**Integration flow:**
+```python
+# In processor (orchestration/continuous_processor.py)
+from src.services.wire_detection import MediaCloudDetector
+
+detector = MediaCloudDetector.from_token(
+    os.getenv("MEDIACLOUD_API_TOKEN"),
+    rate_per_minute=2.0  # Rate limiting
+)
+
+# Check article for wire service match
+result = detector.search_headline(article.title, article.url)
+if result.is_wire:
+    article.wire_check_status = "wire"
+    article.wire_service_name = result.wire_service_name
+else:
+    article.wire_check_status = "local"
+```
+
+**Key configuration:**
+- `MEDIACLOUD_API_TOKEN`: Stored in GCP Secret Manager, auto-resolved from environment
+- Rate limiting: Default 2 requests/minute (configurable via `MEDIACLOUD_RATE_PER_MINUTE`)
+- Only processes articles with status: `cleaned`, `local`, `labeled`, `classified`
+
+### BigQuery Export Integration
+
+**Architecture**: Uses Google Cloud Datastream for CDC (Change Data Capture) replication, NOT manual export code.
+
+**Schema location**: `bigquery/schema.sql` (reference documentation)
+
+**Export criteria:**
+- Only exports articles with `status='labeled'` AND `wire_check_status IN ('local', 'complete')`
+- Excludes wire service content automatically
+- Partitioned by `published_date` for query efficiency
+
+**Tables exported:**
+- `articles`: Main fact table with content, classifications, entities
+- `cin_labels`: CIN classification results (nested in articles)
+- `entities`: Geographic entities and locations (nested in articles)
+
+**Manual removal workflow** (if needed):
+```bash
+# Generate removal CSV
+python scripts/backfill_wire_status.py
+
+# Remove from BigQuery
+python scripts/remove_wire_from_bigquery.py wire_articles.csv
+```
+
+### Argo Workflow Management
+
+**Workflow structure:**
+- `base-pipeline-workflow.yaml`: Reusable WorkflowTemplate (dataset-agnostic)
+- `mizzou-pipeline-cronworkflow.yaml`: Mizzou-specific CronWorkflow (runs every 6 hours)
+- `rbac.yaml`: ServiceAccount permissions
+
+**Common operations:**
+
+```bash
+# Deploy all workflows
+./scripts/deploy_argo_workflows.sh
+
+# Manually trigger a workflow run
+argo submit --from cronwf/mizzou-news-pipeline -n production
+
+# Check workflow status
+argo list -n production
+
+# View workflow logs
+argo logs -n production <workflow-name>
+
+# Delete failed workflows
+argo delete -n production <workflow-name>
+
+# Port-forward Argo UI (opens on localhost:2746)
+kubectl port-forward -n production svc/argo-server 2746:2746
+# Or use VS Code task: "Argo: Port Forward UI"
+```
+
+**Workflow parameters** (in CronWorkflow):
+- `max-articles`: Articles to discover per source (default: 50)
+- `days-back`: How far back to scan feeds (default: 7)
+- `verify-batch-size`: URLs verified per batch (default: 50)
+- `extract-limit`: Max articles per extraction batch (default: 3)
+- `extract-batches`: Number of extraction batches (default: 667)
+- `inter-request-min/max`: Rate limiting delays (5-15s)
+
+### Cloud Deploy Release Process
+
+**Architecture**: Cloud Build → Cloud Deploy → GKE rollout
+
+**Trigger deployment:**
+```bash
+# From local machine (triggers Cloud Build)
+./scripts/deploy-services.sh main api processor
+
+# From GitHub Actions (automatic on PR merge)
+# - Detects changed services
+# - Triggers only affected builds
+# - Creates Cloud Deploy release
+# - GKE rollout happens automatically
+```
+
+**Monitor deployment:**
+```bash
+# Check Cloud Deploy release status
+gcloud deploy releases list --delivery-pipeline=mizzou-news-crawler
+
+# Check GKE rollout status
+kubectl rollout status deployment/mizzou-api -n production
+kubectl rollout status deployment/mizzou-processor -n production
+
+# View recent rollout history
+kubectl rollout history deployment/mizzou-processor -n production
+```
+
+**Rollback procedure:**
+```bash
+# Rollback to previous revision
+kubectl rollout undo deployment/mizzou-processor -n production
+
+# Rollback to specific revision
+kubectl rollout undo deployment/mizzou-processor -n production --to-revision=5
+```
+
+## Debugging Workflows
+
+### Pod Won't Start / CrashLoopBackOff
+
+**Diagnosis steps:**
+```bash
+# 1. Check pod status
+kubectl get pods -n production -l app=mizzou-processor
+
+# 2. Describe pod for events
+kubectl describe pod -n production <pod-name>
+
+# 3. Check logs (if container started at all)
+kubectl logs -n production <pod-name> --previous  # Previous crashed container
+kubectl logs -n production <pod-name>  # Current container
+
+# 4. Check image pull status
+kubectl get events -n production --sort-by='.lastTimestamp' | grep <pod-name>
+```
+
+**Common issues:**
+- **ImagePullBackOff**: Image tag doesn't exist in Artifact Registry → Check Cloud Build status
+- **ConfigMapNotFound**: Missing ConfigMap → Apply: `kubectl apply -f k8s/origin-sitecustomize-configmap.yaml`
+- **Cloud SQL connection failed**: Workload Identity not configured → Check service account IAM bindings
+- **OOMKilled**: Memory limit too low → Increase in deployment YAML
+
+### Migration Failed
+
+**Diagnosis:**
+```bash
+# Run migration manually in pod
+kubectl exec -n production deployment/mizzou-api -- alembic upgrade head
+
+# Check current migration version
+kubectl exec -n production deployment/mizzou-api -- alembic current
+
+# View migration history
+kubectl exec -n production deployment/mizzou-api -- alembic history
+
+# Downgrade one revision
+kubectl exec -n production deployment/mizzou-api -- alembic downgrade -1
+```
+
+**Common issues:**
+- **Revision not found**: Alembic version table out of sync → Check `alembic_version` table
+- **Column already exists**: Migration ran partially → Manual schema inspection needed
+- **Connection timeout**: Cloud SQL connector issue → Check IAM permissions
+
+### Database Connection Issues
+
+**Test connection from pod:**
+```bash
+# Test raw PostgreSQL connection
+kubectl exec -n production deployment/mizzou-api -- python -c "
+import psycopg2
+conn = psycopg2.connect(
+    host='127.0.0.1',
+    port=5432,
+    user='mizzou_user',
+    password='PASSWORD_FROM_SECRET',
+    database='mizzou_production'
+)
+print('Connection successful!')
+conn.close()
+"
+
+# Test Cloud SQL Connector
+kubectl exec -n production deployment/mizzou-api -- python -c "
+from src.models.database import DatabaseManager
+db = DatabaseManager()
+with db.get_session() as session:
+    result = session.execute(text('SELECT 1')).scalar()
+    print(f'Query result: {result}')
+"
+```
+
+### Workflow Stuck / Not Progressing
+
+**Diagnosis:**
+```bash
+# Check workflow status
+argo get -n production <workflow-name>
+
+# View step logs
+argo logs -n production <workflow-name> -c <step-name>
+
+# Check if waiting for resources
+kubectl describe workflow -n production <workflow-name>
+
+# Check pending pods
+kubectl get pods -n production --field-selector=status.phase=Pending
+```
+
+**Common issues:**
+- **Pending indefinitely**: Resource limits exceeded → Check cluster capacity
+- **Step failed silently**: Check container logs for the specific step
+- **Verification/extraction idle**: No work available → Expected behavior, workflow will timeout gracefully
+
+### High Error Rate / Performance Issues
+
+**Check metrics:**
+```bash
+# Pipeline status (last 24 hours)
+kubectl exec -n production deployment/mizzou-processor -- \
+  python -m src.cli.cli_modular pipeline-status --hours 24
+
+# Check error logs
+kubectl logs -n production -l app=mizzou-processor --tail=500 | grep ERROR
+
+# Check pod resource usage
+kubectl top pods -n production
+
+# Check database connection pool
+kubectl exec -n production deployment/mizzou-api -- python -c "
+from src.models.database import DatabaseManager
+db = DatabaseManager()
+print(db.engine.pool.status())
+"
+```
+
+## Local Development with Docker Compose
+
+### Quick Start
+
+```bash
+# Build base image once
+docker-compose --profile base build base
+
+# Start PostgreSQL + API
+docker-compose up -d postgres api
+
+# Start with all services
+docker-compose up -d
+
+# Start specific profiles
+docker-compose --profile crawler up -d  # Postgres + Crawler
+docker-compose --profile processor up -d  # Postgres + Processor
+docker-compose --profile work-queue up -d  # Postgres + Work Queue
+docker-compose --profile tools up -d  # Postgres + Adminer (DB UI)
+```
+
+### Database Management
+
+```bash
+# Access Adminer UI (database web interface)
+docker-compose --profile tools up -d adminer
+# Open http://localhost:8080
+# Server: postgres, User: mizzou_user, Password: mizzou_pass, DB: mizzou
+
+# Run migrations locally
+docker-compose exec api alembic upgrade head
+
+# Reset database (DESTRUCTIVE)
+docker-compose down -v  # Removes postgres_data volume
+docker-compose up -d postgres
+docker-compose exec api alembic upgrade head
+```
+
+### Testing Workflows Locally
+
+```bash
+# Run discovery locally
+docker-compose run --rm crawler python -m src.cli.cli_modular discover-urls --max-articles 10
+
+# Run extraction locally
+docker-compose run --rm processor python -m src.cli.cli_modular extract --limit 5
+
+# Run full pipeline locally (orchestration script)
+docker-compose run --rm processor python orchestration/continuous_processor.py
+```
+
+### Volume Mounts & Hot Reload
+
+**API service has hot reload enabled** (uvicorn --reload):
+- Edit files in `backend/`, `src/` → Changes apply immediately
+- No rebuild needed for Python code changes
+
+**Processor/Crawler services do NOT auto-reload**:
+- Code changes require container restart: `docker-compose restart processor`
+- Or rebuild: `docker-compose build processor && docker-compose up -d processor`
+
+### Environment Variables
+
+Override in `docker-compose.yml` or create `.env` file:
+
+```bash
+# .env file example
+DATABASE_URL=postgresql://mizzou_user:mizzou_pass@postgres:5432/mizzou
+LOG_LEVEL=DEBUG
+MAX_ARTICLES=20
+ENABLE_WIRE_DETECTION=false  # Disable wire detection locally
+```
 
 ## Test Development Protocol
 

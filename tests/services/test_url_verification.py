@@ -97,6 +97,34 @@ def test_verify_url_success() -> None:
     assert result["http_attempts"] == 0
 
 
+def test_verify_url_filters_opinion_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that URLs with /opinion/ path are filtered and labeled as opinion."""
+    service = _service()
+
+    def fail_sniffer(_: str) -> bool:
+        raise AssertionError("StorySniffer should not run for opinion URLs")
+
+    monkeypatch.setattr(service.sniffer, "guess", fail_sniffer)
+
+    # Test various opinion URL formats
+    test_urls = [
+        "https://example.com/opinion/article-title",
+        "https://example.com/news/opinion/some-piece",
+        "https://EXAMPLE.com/OPINION/editorial",  # Case insensitive
+    ]
+
+    for url in test_urls:
+        result = service.verify_url(url)
+
+        assert result["pattern_filtered"] is True, f"Failed for {url}"
+        assert result["pattern_status"] == "opinion", f"Failed for {url}"
+        assert result["pattern_type"] == "opinion", f"Failed for {url}"
+        assert result["storysniffer_result"] is False, f"Failed for {url}"
+        assert result["error"] is None, f"Failed for {url}"
+
+
 def test_verify_url_dynamic_pattern_short_circuits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -238,6 +266,41 @@ def test_process_batch_respects_pattern_status(monkeypatch: pytest.MonkeyPatch) 
     assert metrics["verified_non_articles"] == 1
     assert metrics["verification_errors"] == 0
     assert updates == [("candidate-1", "obituary", None)]
+
+
+def test_process_batch_marks_opinion_urls_correctly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that opinion URLs are marked with opinion status in batch processing."""
+    service = _service(batch_size=2)
+
+    updates: list[tuple[str, str, Optional[str]]] = []
+
+    def capture_update(
+        candidate_id: str, status: str, error: Optional[str] = None
+    ) -> None:
+        updates.append((candidate_id, status, error))
+
+    monkeypatch.setattr(service, "update_candidate_status", capture_update)
+
+    # Mix of regular article and opinion URL
+    batch = [
+        {"id": "article-1", "url": "https://example.com/news/story"},
+        {"id": "opinion-1", "url": "https://example.com/opinion/editorial"},
+    ]
+
+    metrics = service.process_batch(batch)
+
+    assert metrics["total_processed"] == 2
+    assert metrics["verified_articles"] == 1  # Regular article
+    assert metrics["verified_non_articles"] == 1  # Opinion piece
+    assert metrics["verification_errors"] == 0
+
+    # Check that opinion URL got the right status
+    assert updates == [
+        ("article-1", "article", None),
+        ("opinion-1", "opinion", None),
+    ]
 
 
 def test_update_candidate_status_with_and_without_error(

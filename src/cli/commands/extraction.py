@@ -1423,6 +1423,7 @@ def _process_batch(
                             title=content.get("title"),
                             metadata=metadata_value,
                             content=content.get("content"),
+                            raw_html=content.get("html"),
                         )
                         if detection_result:
                             article_status = detection_result.status
