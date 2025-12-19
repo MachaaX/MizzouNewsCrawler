@@ -81,9 +81,7 @@ class TestPausedSourceExclusion:
         assert (
             "null-status-source-1" in source_ids
         ), "Null status source should be included"
-        assert (
-            "paused-source-1" not in source_ids
-        ), "Paused source should be excluded"
+        assert "paused-source-1" not in source_ids, "Paused source should be excluded"
 
         # Verify total count
         assert len(sources_df) == 2, "Should return 2 sources (active + null status)"
@@ -126,9 +124,7 @@ class TestPausedSourceExclusion:
 
         # Verify paused source is excluded
         source_ids = sources_df["id"].tolist()
-        assert (
-            "paused-kprs" not in source_ids
-        ), "Paused KPRS source should be excluded"
+        assert "paused-kprs" not in source_ids, "Paused KPRS source should be excluded"
 
     def test_multiple_paused_sources_all_excluded(self, mock_discovery):
         """Test that multiple paused sources are all excluded."""

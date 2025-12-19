@@ -465,7 +465,7 @@ class ContentTypeDetector:
         raw_html: str | None = None,
     ) -> ContentTypeResult | None:
         """Return the detected content type for the article, if any.
-        
+
         Args:
             url: Article URL
             title: Article title
@@ -660,7 +660,9 @@ class ContentTypeDetector:
         if not byline_signal:
             search_text = raw_html if raw_html else content
             if search_text:
-                cross_pub_result = self._detect_cross_publication_byline(search_text, url_lower)
+                cross_pub_result = self._detect_cross_publication_byline(
+                    search_text, url_lower
+                )
                 if cross_pub_result:
                     publication_name, is_syndicated = cross_pub_result
                     if is_syndicated:
@@ -729,12 +731,12 @@ class ContentTypeDetector:
         # Check both cleaned content footer AND raw HTML footer for copyright/attribution
         # Raw HTML often contains "Powered by", copyright notices that are stripped
         search_sections = []
-        
+
         if content:
             # Check last 150 chars of cleaned content
             closing = content[-150:] if len(content) > 150 else content
             search_sections.append(("cleaned_content", closing))
-        
+
         if raw_html:
             # Check last 1000 chars of raw HTML for footer attributions
             # (e.g., "Powered by Daypop", copyright notices)
@@ -819,10 +821,10 @@ class ContentTypeDetector:
         # ===================================================================
         content_signal = False
 
-        # Search in both cleaned content (first 300 chars for datelines) 
+        # Search in both cleaned content (first 300 chars for datelines)
         # AND raw HTML footer (last 1000 chars for attribution)
         content_search_sections = []
-        
+
         if content:
             # Strip common navigation/menu boilerplate before analysis
             # Many sites have extensive menus before article content starts
@@ -830,7 +832,7 @@ class ContentTypeDetector:
             content_start = cleaned_content[:300]
             content_search_sections.append(("dateline", content_start))
             content_start_lower = content_start.lower()
-        
+
         if raw_html:
             # Also check HTML footer for "Powered by", attribution patterns
             html_footer = raw_html[-1000:] if len(raw_html) > 1000 else raw_html

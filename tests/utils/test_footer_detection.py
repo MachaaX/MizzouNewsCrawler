@@ -7,6 +7,7 @@ statements that appear at the end of HTML pages.
 """
 
 import pytest
+
 from src.utils.content_type_detector import ContentTypeDetector
 
 
@@ -18,7 +19,7 @@ class TestFooterWireDetection:
         # Simulate typical article structure: cleaned content without footer
         # but raw HTML includes footer with Daypop attribution
         cleaned_content = "Nick Reiner's son has rare genetic disorder..."
-        
+
         # Raw HTML includes typical footer structure with Daypop attribution
         raw_html = """
         <html>
@@ -33,26 +34,29 @@ class TestFooterWireDetection:
         </body>
         </html>
         """
-        
+
         detector = ContentTypeDetector()
         result = detector.detect(
             url="https://www.ktts.com/2025/12/16/nick-reiner-son...",
             title="Nick Reiner's son has rare genetic disorder",
             metadata={},
             content=cleaned_content,
-            raw_html=raw_html
+            raw_html=raw_html,
         )
-        
+
         assert result is not None, "Should detect Daypop in footer"
         assert result.status == "wire"
         assert "daypop" in str(result.evidence).lower()
         # Raw HTML used for detection
-        assert "footer" in str(result.evidence).lower() or "raw_html" in str(result.evidence).lower()
+        assert (
+            "footer" in str(result.evidence).lower()
+            or "raw_html" in str(result.evidence).lower()
+        )
 
     def test_detects_copyright_in_html_footer(self):
         """Should detect wire service in copyright notice at end of HTML."""
         cleaned_content = "Article text without copyright notice..."
-        
+
         # Copyright at end of HTML
         raw_html = """
         <html>
@@ -62,16 +66,16 @@ class TestFooterWireDetection:
         </body>
         </html>
         """
-        
+
         detector = ContentTypeDetector()
         result = detector.detect(
             url="https://example.com/news/story",
             title="News Story",
             metadata={},
             content=cleaned_content,
-            raw_html=raw_html
+            raw_html=raw_html,
         )
-        
+
         assert result is not None, "Should detect AP in copyright"
         assert result.status == "wire"
         assert "associated press" in str(result.evidence).lower()
@@ -81,16 +85,16 @@ class TestFooterWireDetection:
         # Copyright in both cleaned content and raw HTML
         cleaned_content = "Story text...\n\n© 2025 Reuters. All rights reserved."
         raw_html = "<html><body><p>Story text...</p><footer>© 2025 Reuters</footer></body></html>"
-        
+
         detector = ContentTypeDetector()
         result = detector.detect(
             url="https://example.com/news/story",
             title="Story Title",
             metadata={},
             content=cleaned_content,
-            raw_html=raw_html
+            raw_html=raw_html,
         )
-        
+
         assert result is not None
         assert result.status == "wire"
         # Should find it in cleaned_content section first
@@ -110,16 +114,16 @@ class TestFooterWireDetection:
         </body>
         </html>
         """
-        
+
         detector = ContentTypeDetector()
         result = detector.detect(
             url="https://localnews.com/story",
             title="Local News Story",
             metadata={},
             content=cleaned_content,
-            raw_html=raw_html
+            raw_html=raw_html,
         )
-        
+
         # Should not detect wire service
         assert result is None or result.status != "wire"
 
@@ -137,16 +141,16 @@ class TestFooterWireDetection:
         </body>
         </html>
         """
-        
+
         detector = ContentTypeDetector()
         result = detector.detect(
             url="https://example.com/news",
             title="Article Title",
             metadata={},
             content=cleaned_content,
-            raw_html=raw_html
+            raw_html=raw_html,
         )
-        
+
         assert result is not None
         assert result.status == "wire"
         # Should detect Daypop pattern in footer
@@ -163,16 +167,16 @@ class TestFooterWireDetection:
         </body>
         </html>
         """
-        
+
         detector = ContentTypeDetector()
         result = detector.detect(
             url="https://example.com/news",
             title="News Article",
             metadata={},
             content=None,  # No cleaned content
-            raw_html=raw_html
+            raw_html=raw_html,
         )
-        
+
         assert result is not None
         assert result.status == "wire"
         assert "associated press" in str(result.evidence).lower()

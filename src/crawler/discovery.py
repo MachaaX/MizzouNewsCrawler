@@ -2133,7 +2133,7 @@ class NewsDiscovery:
             where_clauses = [
                 "s.host IS NOT NULL",
                 "s.host != ''",
-                "(s.status IS NULL OR s.status != 'paused')"
+                "(s.status IS NULL OR s.status != 'paused')",
             ]
             params: dict[str, Any] = {}
 
