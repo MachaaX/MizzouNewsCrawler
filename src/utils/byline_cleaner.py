@@ -436,8 +436,8 @@ class BylineCleaner:
         r"^(.+?)\s+special\s+to?t?\s*(the|he)?\s*(.+)$",
         r"^(.+?)\s+special\s+correspondent.*$",
         r"^(.+?)\s+special\s+contributor.*$",
-        # Email patterns (remove emails)
-        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        # Email patterns (remove emails) - match email with optional preceding whitespace
+        r"(?:^|\s+)[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
         # Phone number patterns (remove phones)
         r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
         r"\(\d{3}\)\s*\d{3}[-.]?\d{4}",

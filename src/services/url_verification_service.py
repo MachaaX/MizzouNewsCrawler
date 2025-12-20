@@ -51,6 +51,63 @@ class URLVerificationService:
         self.logger = logging.getLogger(__name__)
         self.current_job: VerificationJob | None = None
         self.running = False
+        self._url_path_filters = None
+        self._filters_loaded_at = None
+
+    def _load_url_path_filters(self, session):
+        """Load active URL path filters from database with caching."""
+        # Cache filters for 5 minutes
+        if (
+            self._url_path_filters is not None
+            and self._filters_loaded_at is not None
+            and (time.time() - self._filters_loaded_at) < 300
+        ):
+            return self._url_path_filters
+
+        result = session.execute(
+            text("""
+                SELECT path_pattern, filter_type, reason
+                FROM url_path_filters
+                WHERE active = true
+                ORDER BY path_pattern
+            """)
+        )
+        self._url_path_filters = [
+            {"pattern": row[0], "type": row[1], "reason": row[2]}
+            for row in result.fetchall()
+        ]
+        self._filters_loaded_at = time.time()
+        self.logger.info(f"Loaded {len(self._url_path_filters)} URL path filters")
+        return self._url_path_filters
+
+    def _matches_path_filter(self, url: str, filters: list) -> tuple[bool, str | None]:
+        """Check if URL matches any path filter.
+        
+        Returns:
+            (is_filtered, reason) tuple
+        """
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(url)
+        path = parsed.path
+        
+        for filter_config in filters:
+            pattern = filter_config["pattern"]
+            filter_type = filter_config["type"]
+            reason = filter_config["reason"]
+            
+            if filter_type == "prefix" and path.startswith(pattern):
+                return True, reason
+            elif filter_type == "suffix" and path.endswith(pattern):
+                return True, reason
+            elif filter_type == "contains" and pattern in path:
+                return True, reason
+            elif filter_type == "regex":
+                import re
+                if re.search(pattern, path):
+                    return True, reason
+        
+        return False, None
 
     def start_verification_job(
         self,
@@ -95,8 +152,12 @@ class URLVerificationService:
             result = safe_execute(conn, query)
             return [dict(row._mapping) for row in result.fetchall()]
 
-    def verify_url(self, url: str) -> dict:
+    def verify_url(self, url: str, session=None) -> dict:
         """Verify a single URL with StorySniffer.
+
+        Args:
+            url: URL to verify
+            session: Optional database session for loading filters
 
         Returns:
             Dict with verification results and timing info
@@ -110,6 +171,18 @@ class URLVerificationService:
         }
 
         try:
+            # Check URL path filters if session provided
+            if session:
+                filters = self._load_url_path_filters(session)
+                is_filtered, reason = self._matches_path_filter(url, filters)
+                if is_filtered:
+                    result["storysniffer_result"] = False
+                    result["verification_time_ms"] = (time.time() - start_time) * 1000
+                    self.logger.debug(
+                        f"Filtered URL {url}: {reason or 'path filter'}"
+                    )
+                    return result
+            
             # Run StorySniffer verification
             is_article = self.sniffer.guess(url)
             result["storysniffer_result"] = bool(is_article)
@@ -192,9 +265,12 @@ class URLVerificationService:
 
         batch_start_time = time.time()
 
+        # Get session for filter loading
+        session = self.db.session
+
         for candidate in candidates:
-            # Verify URL
-            verification_result = self.verify_url(candidate["url"])
+            # Verify URL (pass session for filter loading)
+            verification_result = self.verify_url(candidate["url"], session=session)
             batch_metrics["total_processed"] += 1
 
             # Update metrics
