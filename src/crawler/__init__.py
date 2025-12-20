@@ -46,6 +46,16 @@ class NotFoundError(Exception):
     pass
 
 
+class ProxyChallengeError(Exception):
+    """Exception raised when proxy returns a challenge/block page.
+    
+    Indicates anti-bot protection that requires cooldown and retry.
+    Should NOT trigger fallback to other extraction methods.
+    """
+
+    pass
+
+
 # Enhanced extraction dependencies
 try:
     from newspaper import Article as NewspaperArticle
@@ -1730,6 +1740,14 @@ class ContentExtractor:
                             unblock_result or {},
                         )
 
+            except ProxyChallengeError as e:
+                # Proxy challenge detected - do NOT fall back to Selenium
+                # Re-raise to mark article for retry
+                logger.warning(f"❌ Proxy challenge for {url}: {e}")
+                if metrics:
+                    metrics.end_method("unblock_proxy", False, str(e), {})
+                raise  # Re-raise ProxyChallengeError to prevent Selenium fallback
+
             except Exception as e:
                 logger.error(f"❌ Unblock proxy extraction failed for {url}: {e}")
                 if metrics:
@@ -2981,7 +2999,8 @@ class ContentExtractor:
                 except Exception as e:
                     logger.debug(f"Unblock fallback attempts failed for {url}: {e}")
 
-                # After fallbacks, if nothing succeeded or we still have a challenge page, return empty -> trigger Selenium fallback in caller
+                # After fallbacks, if nothing succeeded or we still have a challenge page, raise exception
+                # Do NOT return empty dict - that would trigger fallback to Selenium
                 html_len = len(html)
                 challenge_detected = "Access to this page has been denied" in html
                 if (
@@ -2991,7 +3010,7 @@ class ContentExtractor:
                 ):
                     if challenge_detected:
                         logger.warning(
-                            f"Unblock proxy returned challenge page for {url}; escalating to Selenium fallback"
+                            f"Unblock proxy returned challenge page for {url}; marking for retry (no fallback)"
                         )
 
                     proxy_status = (
@@ -3016,7 +3035,10 @@ class ContentExtractor:
                             proxy_error=proxy_error,
                         )
 
-                    return {}
+                    # Raise exception to prevent fallback - article should be retried later
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: {proxy_error}"
+                    )
 
             # Update wire hints from HTML
             self._update_wire_hints_from_html(html, url)
