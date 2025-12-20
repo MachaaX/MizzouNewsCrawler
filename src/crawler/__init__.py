@@ -3084,6 +3084,9 @@ class ContentExtractor:
             logger.info(f"✅ Unblock proxy extraction succeeded for {url}")
             return result
 
+        except ProxyChallengeError:
+            # Re-raise ProxyChallengeError to prevent fallback
+            raise
         except Exception as e:
             logger.error(f"Unblock proxy extraction failed for {url}: {e}")
             return {}
@@ -4524,25 +4527,34 @@ class ContentExtractor:
                     if article_domain.startswith("www."):
                         article_domain = article_domain[4:]
 
-                    # If canonical is on a different domain that's a wire service
+                    # If canonical is on a different domain, treat as syndication
                     if canonical_domain != article_domain:
-                        # Check both exact match and subdomain match
-                        # e.g., consumer.healthday.com should match healthday.com
+                        # First check if it's a known wire service domain
                         wire_name = None
                         if canonical_domain in _WIRE_SERVICE_DOMAINS:
                             wire_name = _WIRE_SERVICE_DOMAINS[canonical_domain]
                         else:
+                            # Check subdomain match (e.g., consumer.healthday.com)
                             for domain, service in _WIRE_SERVICE_DOMAINS.items():
                                 if canonical_domain.endswith("." + domain):
                                     wire_name = service
                                     break
+                        
                         if wire_name:
+                            # Known wire service
                             detection_methods.append("canonical_cross_domain")
                             raw_sources.append(wire_name)
                             evidence.append(f"canonical={canonical_url[:100]}")
                             normalized = self._normalize_wire_service_name(wire_name)
                             if normalized and normalized not in wire_services:
                                 wire_services.append(normalized)
+                        else:
+                            # Unknown domain but cross-domain canonical indicates syndication
+                            # (e.g., Hearst TV stations syndicating between each other)
+                            detection_methods.append("canonical_cross_domain")
+                            raw_sources.append(canonical_domain)
+                            evidence.append(f"canonical={canonical_url[:100]} (cross-domain)")
+                            wire_services.append(canonical_domain)
             except Exception:
                 pass  # URL parsing failed, continue with other methods
 

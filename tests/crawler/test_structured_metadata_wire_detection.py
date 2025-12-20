@@ -126,6 +126,26 @@ class TestCanonicalUrlCrossDomainDetection:
         # Same domain, not a wire service signal
         assert result is None
 
+    def test_canonical_cross_domain_unknown_service(self, extractor):
+        """Test that cross-domain canonical to unknown domain is detected as syndication."""
+        html = """
+        <html>
+        <head>
+            <link rel="canonical" href="https://www.wcvb.com/article/mit-professor-shot-brookline-brown-university-shooting-possible-link/69811151"/>
+        </head>
+        <body></body>
+        </html>
+        """
+        result = extractor._detect_structured_metadata_wire_from_html(
+            html, article_url="https://www.kmbc.com/article/mit-professor-shot-brookline-brown-university-shooting-possible-link/69811635"
+        )
+
+        # Different domain should trigger syndication detection
+        assert result is not None
+        assert "canonical_cross_domain" in result["detected_by"]
+        # wcvb.com should be in wire_services even though it's not in _WIRE_SERVICE_DOMAINS
+        assert any("wcvb.com" in svc.lower() for svc in result["wire_services"])
+
 
 class TestJsonLdAuthorDetection:
     """Test detection via JSON-LD author field containing wire service names."""
