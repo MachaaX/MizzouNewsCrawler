@@ -571,16 +571,29 @@ class NewsDiscovery:
 
         import re
 
+        # Match RSS/Atom feed links with flexible attribute ordering
+        # Supports both:
+        #   <link type="application/rss+xml" href="/feed" ...>
+        #   <link rel="alternate" type="application/rss+xml" href="/feed" ...>
         rss_type = r"(?:application/rss\+xml|application/atom\+xml|text/xml)"
-        pattern = (
+        
+        # Try two patterns: type-before-href and href-before-type
+        pattern_type_first = (
             r'<link[^>]+type=["\']' + rss_type + r'["\'][^>]*href=["\']([^"\']+)["\']'
         )
+        pattern_href_first = (
+            r'<link[^>]+href=["\']([^"\']+)["\'][^>]*type=["\']' + rss_type + r'["\']'
+        )
 
-        matches = re.findall(pattern, html, flags=re.I)
-        if not matches:
+        matches_type_first = re.findall(pattern_type_first, html, flags=re.I)
+        matches_href_first = re.findall(pattern_href_first, html, flags=re.I)
+        
+        # Combine and deduplicate
+        all_matches = matches_type_first + matches_href_first
+        if not all_matches:
             return []
 
-        feeds = [urljoin(base_url, m) for m in matches]
+        feeds = [urljoin(base_url, m) for m in all_matches]
         seen: set[str] = set()
         deduped: list[str] = []
         for feed in feeds:
