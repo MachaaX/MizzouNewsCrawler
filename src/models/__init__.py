@@ -632,6 +632,10 @@ class Source(Base):
     extraction_method = Column(
         String(32), default="http", nullable=False, server_default=text("'http'")
     )
+    # Discovery proxy for sources with bot detection on homepage/RSS
+    # Values: NULL (no proxy), 'decodo', 'selenium_proxy' (uses SELENIUM_PROXY env var)
+    # When set, discovery methods will route requests through specified proxy
+    discovery_proxy = Column(String(32), nullable=True, index=True)
     # Legacy field - kept for backward compatibility, maps to extraction_method
     selenium_only = Column(
         Boolean, default=False, nullable=False, server_default=text("0")
