@@ -51,8 +51,8 @@ def parse_frequency_to_days(freq: str | None) -> float:
     if "tri-week" in f or "triweekly" in f:
         return 7  # 3x per 21-day window, default weekly with additional checks
     if "weekly" in f or "week" in f:
-        # For weekly publications, prefer to run discovery once per week
-        return 7
+        # For weekly publications, run discovery twice per week (every 3.5 days)
+        return 3.5
     if "monthly" in f or "month" in f:
         return 30
     if "hour" in f or "hourly" in f:
