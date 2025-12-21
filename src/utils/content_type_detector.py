@@ -177,11 +177,44 @@ class ContentTypeDetector:
         "perspective",
     )
 
+    _WEATHER_TITLE_KEYWORDS = (
+        "weather",
+        "forecast",
+        "temperature",
+        "temperatures",
+        "warm-up",
+        "warmup",
+        "cool-down",
+        "cooldown",
+        "rain",
+        "snow",
+        "storm",
+        "radar",
+    )
+    _WEATHER_URL_SEGMENTS = (
+        "weather",
+        "forecast",
+        "forecasts",
+    )
+    _WEATHER_CONTENT_KEYWORDS = (
+        "weather forecast",
+        "forecast temperatures",
+        "high temperature",
+        "low temperature",
+        "chance of rain",
+        "chance of snow",
+        "weather outlook",
+        "extended forecast",
+        "weekly forecast",
+        "weekend forecast",
+    )
+
     _TITLE_CONFIDENCE_WEIGHT = 2
     _URL_CONFIDENCE_WEIGHT = 2
     _METADATA_CONFIDENCE_WEIGHT = 1
     _OBITUARY_MAX_SCORE = 12
     _OPINION_MAX_SCORE = 6
+    _WEATHER_MAX_SCORE = 6
 
     def _get_local_broadcaster_callsigns(self, dataset: str = "missouri") -> set[str]:
         """Get local broadcaster callsigns from database with caching.
@@ -500,6 +533,16 @@ class ContentTypeDetector:
         )
         if obituary_result:
             return obituary_result
+
+        weather_result = self._detect_weather(
+            url=url,
+            title=title,
+            keywords=keywords,
+            meta_description=meta_description,
+            content=content,
+        )
+        if weather_result:
+            return weather_result
 
         return self._detect_opinion(
             url=url,
@@ -1319,6 +1362,99 @@ class ContentTypeDetector:
             evidence=matches,
             detector_version=self.VERSION,
         )
+
+    def _detect_weather(
+        self,
+        *,
+        url: str,
+        title: str | None,
+        keywords: Iterable[str],
+        meta_description: str | None,
+        content: str | None = None,
+    ) -> ContentTypeResult | None:
+        """
+        Detect if content is a weather forecast.
+
+        Similar to opinion detection, requires strong signals (title OR url match)
+        plus supporting evidence from keywords/description.
+        """
+        matches: dict[str, list[str]] = {}
+        score = 0
+        strong_signal_detected = False
+
+        # Check title for weather keywords
+        title_matches = self._find_weather_title_matches(title)
+        if title_matches:
+            matches["title"] = title_matches
+            score += self._TITLE_CONFIDENCE_WEIGHT  # +2
+            strong_signal_detected = True
+
+        # Check URL for weather/forecast segments
+        url_matches = self._find_segment_matches(url, self._WEATHER_URL_SEGMENTS)
+        if url_matches:
+            matches["url"] = url_matches
+            score += self._URL_CONFIDENCE_WEIGHT  # +2
+            strong_signal_detected = True
+
+        # Check metadata keywords
+        keyword_matches = self._matches_from_iterable(
+            keywords,
+            self._WEATHER_TITLE_KEYWORDS,
+        )
+        if keyword_matches:
+            matches["keywords"] = keyword_matches
+            score += self._METADATA_CONFIDENCE_WEIGHT
+
+        # Check meta description
+        description_matches = self._find_keyword_matches(
+            meta_description,
+            self._WEATHER_TITLE_KEYWORDS,
+        )
+        if description_matches:
+            matches["meta_description"] = description_matches
+            score += self._METADATA_CONFIDENCE_WEIGHT
+
+        # Optional: Check content lead for weather forecast keywords
+        if content:
+            lead = content[:300]
+            content_matches = self._find_keyword_matches(
+                lead,
+                self._WEATHER_CONTENT_KEYWORDS,
+            )
+            if content_matches:
+                matches["content"] = content_matches
+                score += self._METADATA_CONFIDENCE_WEIGHT
+
+        if not matches:
+            return None
+
+        if not strong_signal_detected:
+            return None
+
+        if score < self._TITLE_CONFIDENCE_WEIGHT:
+            return None
+
+        confidence_score = normalize_score(score, self._WEATHER_MAX_SCORE)
+        confidence = score_to_label(score)
+        return ContentTypeResult(
+            status="weather",
+            confidence_score=confidence_score,
+            confidence=confidence,
+            reason="matched_weather_signals",
+            evidence=matches,
+            detector_version=self.VERSION,
+        )
+
+    def _find_weather_title_matches(self, title: str | None) -> list[str]:
+        """Find weather-related keywords in title."""
+        if not title:
+            return []
+        title_lower = title.lower()
+        matches = []
+        for keyword in self._WEATHER_TITLE_KEYWORDS:
+            if keyword in title_lower:
+                matches.append(keyword)
+        return matches
 
     @staticmethod
     def _normalize_keywords(raw_keywords: str | list[str] | None) -> list[str]:
