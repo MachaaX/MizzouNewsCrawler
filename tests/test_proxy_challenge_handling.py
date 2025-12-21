@@ -264,12 +264,17 @@ class TestProxyChallengeMetrics:
                 },
             ),
             patch("requests.get") as mock_get,
+            patch("requests.post") as mock_post,
         ):
-            # Return challenge page
+            # Return challenge page for both GET and POST
             mock_response = Mock()
             mock_response.status_code = 200
             mock_response.text = "Access to this page has been denied"
             mock_get.return_value = mock_response
+            mock_post.return_value = mock_response
+
+            # Ensure extractor has no proxy_manager to avoid fallback attempts
+            extractor.proxy_manager = None
 
             # Should raise ProxyChallengeError
             with pytest.raises(ProxyChallengeError) as exc_info:
