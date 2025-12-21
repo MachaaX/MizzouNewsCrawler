@@ -956,7 +956,10 @@ class NewsDiscovery:
 
         # Crawl each section URL with newspaper4k
         all_section_articles = []
-        existing_urls = self._get_existing_urls()
+        # Extract host from source_url for duplicate checking
+        from urllib.parse import urlparse
+        source_host = urlparse(source_url).netloc if source_url else None
+        existing_urls = self._get_existing_urls(source_host)
 
         for section_url in section_urls[:10]:  # Limit to first 10 sections
             try:
@@ -1920,13 +1923,33 @@ class NewsDiscovery:
             )
             return False
 
-    def _get_existing_urls(self) -> set[str]:
-        """Return existing URLs from candidate_links to avoid duplicates."""
+    def _get_existing_urls(self, source_host: str | None = None) -> set[str]:
+        """Return existing URLs from candidate_links to avoid duplicates.
+        
+        Args:
+            source_host: If provided, only return URLs from this host domain.
+                        This prevents cross-source duplicate checking.
+        """
         try:
             db_manager = DatabaseManager(self.database_url)
 
             with db_manager.engine.connect() as conn:
-                result = safe_execute(conn, "SELECT url FROM candidate_links")
+                if source_host:
+                    # Filter by URLs that contain this host
+                    # This handles both full URLs and relative paths stored in DB
+                    query = text(
+                        "SELECT url FROM candidate_links "
+                        "WHERE url LIKE :pattern"
+                    )
+                    result = safe_execute(
+                        conn, 
+                        query,
+                        {"pattern": f"%{source_host}%"}
+                    )
+                else:
+                    # Fallback to all URLs if no source specified
+                    result = safe_execute(conn, "SELECT url FROM candidate_links")
+                
                 urls: set[str] = set()
                 for row in result.fetchall():
                     raw = row[0]
@@ -2426,9 +2449,10 @@ class NewsDiscovery:
             )
             
             # Convert to full URLs and create article metadata
-            from urllib.parse import urljoin
+            from urllib.parse import urljoin, urlparse
             
-            existing_urls = self._get_existing_urls()
+            source_host = urlparse(source_url).netloc if source_url else None
+            existing_urls = self._get_existing_urls(source_host)
             discovered_at = datetime.utcnow().isoformat()
             
             for path in unique_paths[:self.max_articles_per_source]:
@@ -2632,10 +2656,7 @@ class NewsDiscovery:
                         html,
                         source_url,
                         rss_missing=rss_missing_active,
-                        max_candidates=min(
-                            self.max_articles_per_source,
-                            25,
-                        ),
+                        max_candidates=self.max_articles_per_source,
                     )
                 except Exception:
                     homepage_candidates = []
@@ -2646,7 +2667,9 @@ class NewsDiscovery:
                         "returning those instead of building",
                         len(homepage_candidates),
                     )
-                    existing_urls = self._get_existing_urls()
+                    from urllib.parse import urlparse
+                    source_host = urlparse(source_url).netloc if source_url else None
+                    existing_urls = self._get_existing_urls(source_host)
                     out = []
                     discovered_at = datetime.utcnow().isoformat()
                     for u in homepage_candidates:
@@ -2795,7 +2818,9 @@ class NewsDiscovery:
             logger.info("Found %d potential articles from homepage" % (article_count,))
 
             # Get existing URLs to prevent duplicates
-            existing_urls = self._get_existing_urls()
+            from urllib.parse import urlparse
+            source_host = urlparse(source_url).netloc if source_url else None
+            existing_urls = self._get_existing_urls(source_host)
 
             # Phase 2: ALWAYS run supplemental section discovery (not just fallback)
             # This ensures we don't miss articles that are in section pages
@@ -3215,7 +3240,9 @@ class NewsDiscovery:
                         feed_url,
                     )
 
-                    existing_urls = self._get_existing_urls()
+                    from urllib.parse import urlparse
+                    source_host = urlparse(source_url).netloc if source_url else None
+                    existing_urls = self._get_existing_urls(source_host)
                     start_len = len(discovered_articles)
 
                     for entry in feed.entries[: self.max_articles_per_source]:
