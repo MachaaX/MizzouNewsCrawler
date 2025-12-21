@@ -1121,3 +1121,95 @@ def test_newspaper_build_worker_unexpected_error(tmp_path):
             str(output_file),
             False,
         )
+
+
+def test_discover_with_newspaper4k_filters_external_domains():
+    """Test that discover_with_newspaper4k filters URLs from external domains.
+    
+    When newspaper4k discovers URLs, only URLs matching the source domain
+    should be returned. External domain URLs should be filtered out.
+    """
+    # Create a mock article with external domain
+    class MockArticle:
+        def __init__(self, url):
+            self.url = url
+    
+    class MockPaper:
+        def __init__(self, articles):
+            self.articles = articles
+    
+    # Create discovery instance with mocked dependencies
+    instance = NewsDiscovery.__new__(NewsDiscovery)
+    instance.session = Mock()
+    instance.session.get.return_value = Mock(
+        status_code=200,
+        text="<html><body>Homepage</body></html>"
+    )
+    instance.user_agent = "test-agent"
+    instance.timeout = 5
+    instance.max_articles_per_source = 25
+    instance.telemetry = None
+    instance.proxy_pool = None  # No proxies for test
+    instance._get_existing_urls = Mock(return_value=set())
+    instance._extract_homepage_feed_urls = Mock(return_value=[])
+    instance._extract_homepage_article_candidates = Mock(return_value=[])
+    instance._discover_from_section_urls = Mock(return_value=[])
+    instance._normalize_candidate_url = lambda url: url  # Simple passthrough
+    
+    # Mock newspaper build to return articles from multiple domains
+    mock_paper = MockPaper([
+        MockArticle("https://example.com/article1"),  # Same domain - should be kept
+        MockArticle("https://example.com/article2"),  # Same domain - should be kept
+        MockArticle("https://external.org/article3"),  # External - should be filtered
+        MockArticle("https://another.com/article4"),  # External - should be filtered
+        MockArticle("https://example.com/article5"),  # Same domain - should be kept
+    ])
+    
+    with patch("multiprocessing.Process") as mock_process_class:
+        # Mock the multiprocessing approach
+        mock_process = Mock()
+        mock_process_class.return_value = mock_process
+        
+        # Mock reading back URLs from temp file
+        import tempfile
+        import pickle
+        
+        # Simulate the build worker writing all URLs to file
+        # (filtering happens in discover_with_newspaper4k, not in worker)
+        all_urls = [a.url for a in mock_paper.articles]
+        
+        original_open = open
+        def mock_open_impl(file, mode='r', *args, **kwargs):
+            if mode == 'rb' and 'tmp' in str(file):
+                # Return temp file with all URLs (unfiltered from worker)
+                import io
+                content = pickle.dumps(all_urls)
+                return io.BytesIO(content)
+            return original_open(file, mode, *args, **kwargs)
+        
+        with patch("builtins.open", mock_open_impl):
+            with patch("os.unlink"):
+                # Call discover_with_newspaper4k
+                result = instance.discover_with_newspaper4k(
+                    source_url="https://example.com",
+                    source_id="test-source",
+                    operation_id="test-op",
+                    allow_build=True
+                )
+    
+    # Verify only same-domain URLs are returned
+    assert len(result) == 3, f"Expected 3 same-domain URLs, got {len(result)}"
+    
+    returned_urls = [article["url"] for article in result]
+    assert "https://example.com/article1" in returned_urls
+    assert "https://example.com/article2" in returned_urls
+    assert "https://example.com/article5" in returned_urls
+    
+    # Verify external domains are filtered out
+    assert "https://external.org/article3" not in returned_urls
+    assert "https://another.com/article4" not in returned_urls
+    
+    # Verify discovery method is set correctly
+    for article in result:
+        assert article["discovery_method"] == "newspaper4k"
+        assert article["source_url"] == "https://example.com"
