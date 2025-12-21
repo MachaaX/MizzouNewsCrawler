@@ -278,7 +278,7 @@ docker run --rm \
     -v "$(pwd)":/workspace \
     -w /workspace \
     us-central1-docker.pkg.dev/mizzou-news-crawler/mizzou-crawler/ci-base:latest \
-    /bin/bash -c "pytest -m 'not postgres' --cov=src --cov-report=term-missing -v" 2>&1 | grep -v "WARNING: The requested image's platform" || true
+    /bin/bash -c "pytest -m 'not postgres' -v" 2>&1 | grep -v "WARNING: The requested image's platform" || true
 TEST_EXIT_CODE=${PIPESTATUS[0]}  # Gets exit code of docker run, not grep
 set -e   # Re-enable exit-on-error
 
