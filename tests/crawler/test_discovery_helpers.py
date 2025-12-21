@@ -663,7 +663,7 @@ def test_discover_with_newspaper4k_records_no_feed(monkeypatch):
     instance.user_agent = "pytest-agent"  # type: ignore[attr-defined]
     instance.timeout = 1  # type: ignore[attr-defined]
     instance.max_articles_per_source = 5  # type: ignore[attr-defined]
-    instance._get_existing_urls = lambda: set()  # type: ignore[attr-defined]
+    instance._get_existing_urls = lambda source_host=None: set()  # type: ignore[attr-defined]
 
     articles = discovery_module.NewsDiscovery.discover_with_newspaper4k(
         instance,
@@ -687,7 +687,7 @@ def test_discover_with_rss_feeds_handles_transient_errors(monkeypatch):
     instance.timeout = 3
     instance.max_articles_per_source = 10
     instance.cutoff_date = datetime.utcnow() - timedelta(days=3)
-    instance._get_existing_urls = lambda: set()  # type: ignore[attr-defined]
+    instance._get_existing_urls = lambda source_host=None: set()  # type: ignore[attr-defined]
     instance.telemetry = None  # type: ignore[attr-defined]
 
     def raise_exc(exc: Exception):

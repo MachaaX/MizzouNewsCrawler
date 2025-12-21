@@ -413,8 +413,8 @@ def test_run_post_extraction_cleaning_updates_status(monkeypatch):
             self.closed = False
 
         def execute(self, query, params=None):
-            if "SELECT content" in str(query):
-                return FakeQuery([["content", "extracted"]])
+            if "SELECT title, content, status" in str(query):
+                return FakeQuery([["Title", "content", "extracted"]])
             self.updates.append((query, params))
             return _FakeResult([])
 
