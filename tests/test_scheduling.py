@@ -27,8 +27,8 @@ def test_parse_frequency_broadcast():
 
 
 def test_parse_frequency_weekly():
-    assert parse_frequency_to_days("weekly") == 7
-    assert parse_frequency_to_days("every week") == 7
+    assert parse_frequency_to_days("weekly") == 3.5
+    assert parse_frequency_to_days("every week") == 3.5
 
 
 def test_parse_frequency_biweekly():
@@ -90,8 +90,8 @@ def test_should_schedule_discovery_broadcast_uses_12_hour_window():
 @pytest.mark.parametrize(
     "frequency,delta_hours,expected",
     [
-        ("weekly", 24 * 6, False),
-        ("weekly", 24 * 8, True),
+        ("weekly", 24 * 3, False),  # 3 days < 3.5 days, not due yet
+        ("weekly", 24 * 4, True),  # 4 days > 3.5 days, due for discovery
         ("monthly", 24 * 20, False),
         ("monthly", 24 * 35, True),
         (None, 24 * 5, False),

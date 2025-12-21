@@ -626,6 +626,37 @@ class SourceProcessor:
         rss_attempted = False
         skip_rss = False
 
+        # Special handling: proxy scraping for sources with discovery_proxy set
+        discovery_proxy = None
+        if hasattr(self.source_row, "discovery_proxy"):
+            discovery_proxy = self.source_row.discovery_proxy
+
+        if discovery_proxy:
+            logger.info(
+                f"Using proxy scraping for {self.source_name} "
+                f"(discovery_proxy: {discovery_proxy})"
+            )
+            try:
+                self.discovery_methods_attempted.append("proxy_scraping")
+                proxy_articles = self.discovery.discover_with_proxy_scraping(
+                    self.source_url,
+                    self.source_id,
+                    self.operation_id,
+                    source_meta=self.source_meta,
+                )
+                if proxy_articles:
+                    logger.info(f"Proxy scraping found {len(proxy_articles)} articles")
+                    all_discovered.extend(proxy_articles)
+                    # If proxy scraping succeeded, return early
+                    # (other methods known to fail for these sites)
+                    return all_discovered
+                else:
+                    logger.warning(
+                        f"Proxy scraping found no articles for {self.source_name}"
+                    )
+            except Exception as e:
+                logger.error(f"Proxy scraping failed for {self.source_name}: {e}")
+
         if DiscoveryMethod.RSS_FEED in self.effective_methods:
             (
                 rss_articles,

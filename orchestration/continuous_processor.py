@@ -138,24 +138,25 @@ class WorkQueue:
                 )
                 counts["cleaning_pending"] = result.scalar() or 0
 
-            # Count articles without ML analysis (only status='extracted' are ready)
+            # Count articles without ML analysis (cleaned articles are ready for ML)
             if ENABLE_ML_ANALYSIS:
                 result = db.session.execute(
                     text(
                         "SELECT COUNT(*) FROM articles "
-                        "WHERE status = 'extracted' "
+                        "WHERE status IN ('cleaned', 'local') "
+                        "AND wire_check_status != 'wire' "
                         "AND primary_label IS NULL"
                     )
                 )
                 counts["analysis_pending"] = result.scalar() or 0
 
             # Count articles without entity extraction
-            # (extracted or classified articles are ready)
+            # (labeled articles are ready for entity extraction)
             if ENABLE_ENTITY_EXTRACTION:
                 result = db.session.execute(
                     text(
                         "SELECT COUNT(*) FROM articles a "
-                        "WHERE a.status IN ('extracted', 'classified') "
+                        "WHERE a.status = 'labeled' "
                         "AND NOT EXISTS ("
                         "  SELECT 1 FROM article_entities ae WHERE ae.article_id = a.id"
                         ") AND a.content IS NOT NULL"

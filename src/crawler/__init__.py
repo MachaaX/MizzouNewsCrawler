@@ -46,6 +46,16 @@ class NotFoundError(Exception):
     pass
 
 
+class ProxyChallengeError(Exception):
+    """Exception raised when proxy returns a challenge/block page.
+
+    Indicates anti-bot protection that requires cooldown and retry.
+    Should NOT trigger fallback to other extraction methods.
+    """
+
+    pass
+
+
 # Enhanced extraction dependencies
 try:
     from newspaper import Article as NewspaperArticle
@@ -1730,6 +1740,14 @@ class ContentExtractor:
                             unblock_result or {},
                         )
 
+            except ProxyChallengeError as e:
+                # Proxy challenge detected - do NOT fall back to Selenium
+                # Re-raise to mark article for retry
+                logger.warning(f"❌ Proxy challenge for {url}: {e}")
+                if metrics:
+                    metrics.end_method("unblock_proxy", False, str(e), {})
+                raise  # Re-raise ProxyChallengeError to prevent Selenium fallback
+
             except Exception as e:
                 logger.error(f"❌ Unblock proxy extraction failed for {url}: {e}")
                 if metrics:
@@ -2981,7 +2999,8 @@ class ContentExtractor:
                 except Exception as e:
                     logger.debug(f"Unblock fallback attempts failed for {url}: {e}")
 
-                # After fallbacks, if nothing succeeded or we still have a challenge page, return empty -> trigger Selenium fallback in caller
+                # After fallbacks, if nothing succeeded or we still have a challenge page, raise exception
+                # Do NOT return empty dict - that would trigger fallback to Selenium
                 html_len = len(html)
                 challenge_detected = "Access to this page has been denied" in html
                 if (
@@ -2991,14 +3010,10 @@ class ContentExtractor:
                 ):
                     if challenge_detected:
                         logger.warning(
-                            f"Unblock proxy returned challenge page for {url}; escalating to Selenium fallback"
+                            f"Unblock proxy returned challenge page for {url}; marking for retry (no fallback)"
                         )
 
-                    proxy_status = (
-                        "challenge_page"
-                        if challenge_detected
-                        else ("failed" if response is None else "small_response")
-                    )
+                    proxy_status = "failed"  # All failure modes map to "failed" status
                     proxy_error = (
                         "challenge_page"
                         if challenge_detected
@@ -3016,7 +3031,10 @@ class ContentExtractor:
                             proxy_error=proxy_error,
                         )
 
-                    return {}
+                    # Raise exception to prevent fallback - article should be retried later
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: {proxy_error}"
+                    )
 
             # Update wire hints from HTML
             self._update_wire_hints_from_html(html, url)
@@ -3062,6 +3080,9 @@ class ContentExtractor:
             logger.info(f"✅ Unblock proxy extraction succeeded for {url}")
             return result
 
+        except ProxyChallengeError:
+            # Re-raise ProxyChallengeError to prevent fallback
+            raise
         except Exception as e:
             logger.error(f"Unblock proxy extraction failed for {url}: {e}")
             return {}
@@ -4502,25 +4523,36 @@ class ContentExtractor:
                     if article_domain.startswith("www."):
                         article_domain = article_domain[4:]
 
-                    # If canonical is on a different domain that's a wire service
+                    # If canonical is on a different domain, treat as syndication
                     if canonical_domain != article_domain:
-                        # Check both exact match and subdomain match
-                        # e.g., consumer.healthday.com should match healthday.com
+                        # First check if it's a known wire service domain
                         wire_name = None
                         if canonical_domain in _WIRE_SERVICE_DOMAINS:
                             wire_name = _WIRE_SERVICE_DOMAINS[canonical_domain]
                         else:
+                            # Check subdomain match (e.g., consumer.healthday.com)
                             for domain, service in _WIRE_SERVICE_DOMAINS.items():
                                 if canonical_domain.endswith("." + domain):
                                     wire_name = service
                                     break
+
                         if wire_name:
+                            # Known wire service
                             detection_methods.append("canonical_cross_domain")
                             raw_sources.append(wire_name)
                             evidence.append(f"canonical={canonical_url[:100]}")
                             normalized = self._normalize_wire_service_name(wire_name)
                             if normalized and normalized not in wire_services:
                                 wire_services.append(normalized)
+                        else:
+                            # Unknown domain but cross-domain canonical indicates syndication
+                            # (e.g., Hearst TV stations syndicating between each other)
+                            detection_methods.append("canonical_cross_domain")
+                            raw_sources.append(canonical_domain)
+                            evidence.append(
+                                f"canonical={canonical_url[:100]} (cross-domain)"
+                            )
+                            wire_services.append(canonical_domain)
             except Exception:
                 pass  # URL parsing failed, continue with other methods
 

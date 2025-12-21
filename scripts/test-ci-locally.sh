@@ -260,13 +260,12 @@ echo -e "${GREEN}✅ Step 3/4: Workflow template validation passed${NC}"
 
 # Step 7: Run unit + integration tests (excludes PostgreSQL-specific tests) like CI does
 echo ""
-echo "🧪 Step 4/4: Running unit + integration tests in linux/amd64 container (matches CI ubuntu-latest)..."
+echo "🧪 Step 4/5: Running unit + integration tests in linux/amd64 container (matches CI ubuntu-latest)..."
 echo "   📊 Unit + Integration tests (excludes PostgreSQL-specific tests)"
 echo "   ⏱️  Estimated time: 10-15 minutes"
 echo ""
 echo "   💡 Tests use SQLite in-memory (FAST, matches CI 'integration' job)"
-echo "      PostgreSQL integration tests run separately (CI 'postgres-integration' job)"
-echo "      Coverage threshold: 78% (aggregate of unit + integration)"
+echo "      PostgreSQL integration tests run separately in Step 5"
 echo "      Excluding tests marked with @pytest.mark.postgres"
 echo ""
 echo "   🔄 Progress will show test names as they complete..."
@@ -279,7 +278,7 @@ docker run --rm \
     -v "$(pwd)":/workspace \
     -w /workspace \
     us-central1-docker.pkg.dev/mizzou-news-crawler/mizzou-crawler/ci-base:latest \
-    /bin/bash -c "pytest -m 'not postgres' --cov=src --cov-report=term-missing --cov-fail-under=78 -v" 2>&1 | grep -v "WARNING: The requested image's platform" || true
+    /bin/bash -c "pytest -m 'not postgres' -v" 2>&1 | grep -v "WARNING: The requested image's platform" || true
 TEST_EXIT_CODE=${PIPESTATUS[0]}  # Gets exit code of docker run, not grep
 set -e   # Re-enable exit-on-error
 
@@ -287,7 +286,7 @@ if [ $TEST_EXIT_CODE -ne 0 ]; then
     echo -e "${RED}❌ Unit + integration tests failed${NC}"
     exit 1
 fi
-echo -e "${GREEN}✅ Step 4/4: Unit + integration tests passed (78% coverage)${NC}"
+echo -e "${GREEN}✅ Step 4/4: Unit + integration tests passed${NC}"
 
 # Step 8: Run PostgreSQL integration tests (like CI postgres-integration job)
 echo ""

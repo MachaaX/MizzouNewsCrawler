@@ -571,16 +571,29 @@ class NewsDiscovery:
 
         import re
 
+        # Match RSS/Atom feed links with flexible attribute ordering
+        # Supports both:
+        #   <link type="application/rss+xml" href="/feed" ...>
+        #   <link rel="alternate" type="application/rss+xml" href="/feed" ...>
         rss_type = r"(?:application/rss\+xml|application/atom\+xml|text/xml)"
-        pattern = (
+
+        # Try two patterns: type-before-href and href-before-type
+        pattern_type_first = (
             r'<link[^>]+type=["\']' + rss_type + r'["\'][^>]*href=["\']([^"\']+)["\']'
         )
+        pattern_href_first = (
+            r'<link[^>]+href=["\']([^"\']+)["\'][^>]*type=["\']' + rss_type + r'["\']'
+        )
 
-        matches = re.findall(pattern, html, flags=re.I)
-        if not matches:
+        matches_type_first = re.findall(pattern_type_first, html, flags=re.I)
+        matches_href_first = re.findall(pattern_href_first, html, flags=re.I)
+
+        # Combine and deduplicate
+        all_matches = matches_type_first + matches_href_first
+        if not all_matches:
             return []
 
-        feeds = [urljoin(base_url, m) for m in matches]
+        feeds = [urljoin(base_url, m) for m in all_matches]
         seen: set[str] = set()
         deduped: list[str] = []
         for feed in feeds:
@@ -943,7 +956,11 @@ class NewsDiscovery:
 
         # Crawl each section URL with newspaper4k
         all_section_articles = []
-        existing_urls = self._get_existing_urls()
+        # Extract host from source_url for duplicate checking
+        from urllib.parse import urlparse
+
+        source_host = urlparse(source_url).netloc if source_url else None
+        existing_urls = self._get_existing_urls(source_host)
 
         for section_url in section_urls[:10]:  # Limit to first 10 sections
             try:
@@ -1907,13 +1924,28 @@ class NewsDiscovery:
             )
             return False
 
-    def _get_existing_urls(self) -> set[str]:
-        """Return existing URLs from candidate_links to avoid duplicates."""
+    def _get_existing_urls(self, source_host: str | None = None) -> set[str]:
+        """Return existing URLs from candidate_links to avoid duplicates.
+
+        Args:
+            source_host: If provided, only return URLs from this host domain.
+                        This prevents cross-source duplicate checking.
+        """
         try:
             db_manager = DatabaseManager(self.database_url)
 
             with db_manager.engine.connect() as conn:
-                result = safe_execute(conn, "SELECT url FROM candidate_links")
+                if source_host:
+                    # Filter by URLs that contain this host
+                    # This handles both full URLs and relative paths stored in DB
+                    query = text(
+                        "SELECT url FROM candidate_links " "WHERE url LIKE :pattern"
+                    )
+                    result = safe_execute(conn, query, {"pattern": f"%{source_host}%"})
+                else:
+                    # Fallback to all URLs if no source specified
+                    result = safe_execute(conn, "SELECT url FROM candidate_links")
+
                 urls: set[str] = set()
                 for row in result.fetchall():
                     raw = row[0]
@@ -2320,6 +2352,148 @@ class NewsDiscovery:
 
             return df, stats
 
+    def discover_with_proxy_scraping(
+        self,
+        source_url: str,
+        source_id: str | None = None,
+        operation_id: str | None = None,
+        source_meta: dict | None = None,
+    ) -> list[dict]:
+        """Custom proxy-based discovery for sites with strict bot detection.
+
+        Uses residential proxy to bypass bot detection on homepage, then
+        extracts article URLs via regex pattern matching. Designed for sites
+        where standard discovery methods (RSS, newspaper4k) fail due to
+        403/bot blocking but content is accessible via proxy.
+
+        Args:
+            source_url: Base URL of the news source
+            source_id: UUID of the source
+            operation_id: UUID of the discovery operation
+            source_meta: Source metadata dictionary
+
+        Returns:
+            List of discovered article metadata
+        """
+        import re
+
+        discovered_articles: list[dict[str, Any]] = []
+        method_start_time = time.time()
+
+        try:
+            # Get proxy from environment (same as extraction uses)
+            proxy_url = os.getenv("SELENIUM_PROXY")
+            if not proxy_url:
+                logger.warning(
+                    "Proxy scraping requested but SELENIUM_PROXY not configured"
+                )
+                return []
+
+            proxies = {
+                "http": proxy_url,
+                "https": proxy_url,
+            }
+
+            # Fetch homepage through proxy
+            logger.info(f"Fetching {source_url} via proxy for discovery")
+            response = self.session.get(
+                source_url,
+                proxies=proxies,
+                timeout=self.timeout,
+                headers={"User-Agent": self.user_agent},
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"Proxy scraping failed: HTTP {response.status_code}")
+                return []
+
+            logger.info(f"Successfully fetched {len(response.text)} bytes via proxy")
+
+            # Extract article URLs based on site-specific patterns
+            html = response.text
+
+            # Site-specific patterns (can be expanded)
+            patterns = {
+                "bolivarmonews.com": r'/stories/[^"<>]+,\d+',
+                # Add more patterns here as needed
+            }
+
+            # Determine which pattern to use
+            pattern = None
+            for domain, regex in patterns.items():
+                if domain in source_url:
+                    pattern = regex
+                    break
+
+            if not pattern:
+                logger.warning(
+                    f"No article pattern defined for {source_url} in proxy scraping"
+                )
+                return []
+
+            # Extract URLs
+            matches = re.findall(pattern, html)
+            unique_paths = sorted(set(matches))
+
+            logger.info(
+                f"Found {len(unique_paths)} unique article paths via proxy scraping"
+            )
+
+            # Convert to full URLs and create article metadata
+            from urllib.parse import urljoin, urlparse
+
+            source_host = urlparse(source_url).netloc if source_url else None
+            existing_urls = self._get_existing_urls(source_host)
+            discovered_at = datetime.utcnow().isoformat()
+
+            for path in unique_paths[: self.max_articles_per_source]:
+                full_url = urljoin(source_url, path)
+                normalized = self._normalize_candidate_url(full_url)
+
+                if normalized in existing_urls:
+                    continue
+
+                article_data = {
+                    "url": full_url,
+                    "source_url": source_url,
+                    "discovery_method": "proxy_scraping",
+                    "discovered_at": discovered_at,
+                    "metadata": {
+                        "proxy_used": True,
+                        "pattern_matched": pattern,
+                    },
+                }
+
+                discovered_articles.append(article_data)
+                existing_urls.add(normalized)
+
+            # Record telemetry
+            if self.telemetry and source_id and operation_id:
+                elapsed_ms = (time.time() - method_start_time) * 1000
+                try:
+                    self.telemetry.update_discovery_method_effectiveness(
+                        source_id=source_id,
+                        source_url=source_url,
+                        discovery_method=DiscoveryMethod.NEWSPAPER4K,  # Use existing enum
+                        status=DiscoveryMethodStatus.SUCCESS,
+                        articles_found=len(discovered_articles),
+                        response_time_ms=elapsed_ms,
+                        status_codes=[200],
+                        notes=f"proxy_scraping: {len(unique_paths)} paths",
+                    )
+                except Exception:
+                    logger.debug("Failed to record proxy scraping telemetry")
+
+            logger.info(
+                f"Proxy scraping found {len(discovered_articles)} articles "
+                f"for {source_url}"
+            )
+
+        except Exception as e:
+            logger.error(f"Proxy scraping failed for {source_url}: {e}")
+
+        return discovered_articles
+
     def discover_with_newspaper4k(
         self,
         source_url: str,
@@ -2473,10 +2647,7 @@ class NewsDiscovery:
                         html,
                         source_url,
                         rss_missing=rss_missing_active,
-                        max_candidates=min(
-                            self.max_articles_per_source,
-                            25,
-                        ),
+                        max_candidates=self.max_articles_per_source,
                     )
                 except Exception:
                     homepage_candidates = []
@@ -2487,7 +2658,10 @@ class NewsDiscovery:
                         "returning those instead of building",
                         len(homepage_candidates),
                     )
-                    existing_urls = self._get_existing_urls()
+                    from urllib.parse import urlparse
+
+                    source_host = urlparse(source_url).netloc if source_url else None
+                    existing_urls = self._get_existing_urls(source_host)
                     out = []
                     discovered_at = datetime.utcnow().isoformat()
                     for u in homepage_candidates:
@@ -2636,7 +2810,10 @@ class NewsDiscovery:
             logger.info("Found %d potential articles from homepage" % (article_count,))
 
             # Get existing URLs to prevent duplicates
-            existing_urls = self._get_existing_urls()
+            from urllib.parse import urlparse
+
+            source_host = urlparse(source_url).netloc if source_url else None
+            existing_urls = self._get_existing_urls(source_host)
 
             # Phase 2: ALWAYS run supplemental section discovery (not just fallback)
             # This ensures we don't miss articles that are in section pages
@@ -3056,7 +3233,10 @@ class NewsDiscovery:
                         feed_url,
                     )
 
-                    existing_urls = self._get_existing_urls()
+                    from urllib.parse import urlparse
+
+                    source_host = urlparse(source_url).netloc if source_url else None
+                    existing_urls = self._get_existing_urls(source_host)
                     start_len = len(discovered_articles)
 
                     for entry in feed.entries[: self.max_articles_per_source]:

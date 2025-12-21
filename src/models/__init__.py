@@ -409,6 +409,50 @@ class WireService(Base):
     __table_args__ = ({"comment": "Wire service detection patterns"},)
 
 
+class UrlPathFilter(Base):
+    """URL path patterns to exclude from article verification.
+
+    Stores URL path prefixes that indicate non-article content (videos,
+    galleries, tags, etc.) to filter before StorySniffer verification.
+    """
+
+    __tablename__ = "url_path_filters"
+
+    id = Column(Integer, primary_key=True)
+    path_pattern = Column(
+        String(200),
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="URL path pattern to filter (e.g., /video/, /gallery/)",
+    )
+    filter_type = Column(
+        String(50),
+        nullable=False,
+        default="prefix",
+        comment="Match type: prefix, suffix, contains, regex",
+    )
+    reason = Column(
+        String(200),
+        nullable=True,
+        comment="Why this pattern is filtered (e.g., 'video content')",
+    )
+    active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="Whether this filter is active",
+    )
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = ({"comment": "URL path filters for non-article content"},)
+
+
 class ArticleEntity(Base):
     """Structured entity extraction aligned with gazetteer categories."""
 
@@ -588,6 +632,10 @@ class Source(Base):
     extraction_method = Column(
         String(32), default="http", nullable=False, server_default=text("'http'")
     )
+    # Discovery proxy for sources with bot detection on homepage/RSS
+    # Values: NULL (no proxy), 'decodo', 'selenium_proxy' (uses SELENIUM_PROXY env var)
+    # When set, discovery methods will route requests through specified proxy
+    discovery_proxy = Column(String(32), nullable=True, index=True)
     # Legacy field - kept for backward compatibility, maps to extraction_method
     selenium_only = Column(
         Boolean, default=False, nullable=False, server_default=text("0")

@@ -76,18 +76,25 @@ class _PlaceholderNotFoundError(Exception):
     """Fallback exception until crawler dependencies are loaded."""
 
 
+class _PlaceholderProxyChallengeError(Exception):
+    """Fallback exception until crawler dependencies are loaded."""
+
+
 NotFoundError: type[Exception] = _PlaceholderNotFoundError
+ProxyChallengeError: type[Exception] = _PlaceholderProxyChallengeError
 
 
 def _ensure_crawler_dependencies() -> None:
     """Lazily import heavy crawler dependencies when needed."""
-    global ContentExtractor, NotFoundError
+    global ContentExtractor, NotFoundError, ProxyChallengeError
     if ContentExtractor is None:
         from src.crawler import ContentExtractor as _ContentExtractor
         from src.crawler import NotFoundError as _NotFoundError
+        from src.crawler import ProxyChallengeError as _ProxyChallengeError
 
         ContentExtractor = _ContentExtractor
         NotFoundError = _NotFoundError
+        ProxyChallengeError = _ProxyChallengeError
 
 
 logger = logging.getLogger(__name__)
@@ -1248,6 +1255,52 @@ def _process_batch(
                 content = extractor.extract_content(url, metrics=metrics)
                 detection_payload = None
 
+                # Check for proxy/bot challenge page before processing
+                if content and content.get("title"):
+                    title = content.get("title", "")
+                    content_text = content.get("content", "")
+
+                    # Proxy challenge patterns
+                    proxy_patterns = [
+                        "Access to this page has been denied",
+                        "Attention Required",
+                        "Just a moment",
+                        "Please verify you are a human",
+                        "Checking your browser",
+                        "Access Denied",
+                    ]
+
+                    is_proxy_challenge = any(
+                        pattern in title
+                        or (content_text and pattern in content_text[:500])
+                        for pattern in proxy_patterns
+                    )
+
+                    if is_proxy_challenge:
+                        logger.warning(
+                            "🚫 Proxy/bot challenge detected for %s (title: %s)",
+                            url,
+                            title[:100],
+                        )
+                        # Mark as failed and skip this URL
+                        try:
+                            safe_session_execute(
+                                session,
+                                CANDIDATE_STATUS_UPDATE_SQL,
+                                {"status": "proxy_blocked", "id": str(url_id)},
+                            )
+                            session.commit()
+                        except Exception:
+                            logger.exception("Failed to mark URL as proxy_blocked")
+                            session.rollback()
+
+                        error_msg = f"Proxy challenge detected: {title[:100]}"
+                        metrics.error_message = error_msg
+                        metrics.error_type = "proxy_blocked"
+                        metrics.finalize(content)
+                        telemetry.record_extraction(metrics)
+                        continue
+
                 if content and content.get("title"):
                     # Track successful extraction from this domain
                     domain_article_count[domain] = (
@@ -1730,6 +1783,37 @@ def _process_batch(
                 # Skip counting 404s against aggregate domain failures
                 continue
 
+            except ProxyChallengeError as e:
+                # Proxy challenge/block - mark for retry with cooldown
+                logger.warning("Proxy challenge detected for %s: %s", url, e)
+                try:
+                    # Don't mark as failed - keep status as 'article' so it gets retried later
+                    # This allows the article to be picked up again after cooldown period
+                    logger.info(
+                        "Keeping article %s in 'article' status for retry after cooldown",
+                        url,
+                    )
+                    # Optionally: could add last_attempt_at timestamp to track cooldown
+                    # For now, rely on natural batch rotation to provide cooldown
+                except Exception:
+                    logger.exception("Failed to handle proxy challenge for %s", url)
+                    session.rollback()
+
+                # Track as domain failure to skip remaining URLs from this domain
+                domain_failures[domain] = domain_failures.get(domain, 0) + 1
+                logger.warning(
+                    "Domain %s proxy challenge (#%d); skipping remaining URLs in batch",
+                    domain,
+                    domain_failures[domain],
+                )
+                skipped_domains.add(domain)
+
+                metrics.error_message = str(e)
+                metrics.error_type = "proxy_challenge"
+                metrics.finalize({})
+                telemetry.record_extraction(metrics)
+                continue
+
             except Exception as e:
                 # Check for rate limit or bot protection in exception
                 error_str = str(e)
@@ -1969,15 +2053,49 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                 try:
                     row = safe_session_execute(
                         session,
-                        text("SELECT content, status FROM articles WHERE id = :id"),
+                        text(
+                            "SELECT title, content, status FROM articles WHERE id = :id"
+                        ),
                         {"id": article_id},
                     ).fetchone()
 
                     if not row:
                         continue
 
-                    original_content = row[0] or ""
-                    current_status = row[1] or "extracted"
+                    title = row[0] or ""
+                    original_content = row[1] or ""
+                    current_status = row[2] or "extracted"
+
+                    # Check for proxy/bot challenge in title or content
+                    proxy_patterns = [
+                        "Access to this page has been denied",
+                        "Attention Required",
+                        "Just a moment",
+                        "Please verify you are a human",
+                        "Checking your browser",
+                        "Access Denied",
+                    ]
+
+                    is_proxy_challenge = any(
+                        pattern in title or pattern in original_content[:500]
+                        for pattern in proxy_patterns
+                    )
+
+                    if is_proxy_challenge:
+                        logger.warning(
+                            "🚫 Proxy challenge during cleaning: %s (title: %s)",
+                            article_id[:8],
+                            title[:100],
+                        )
+                        # Mark as error status to exclude from BigQuery
+                        safe_session_execute(
+                            session,
+                            text("UPDATE articles SET status = 'error' WHERE id = :id"),
+                            {"id": article_id},
+                        )
+                        _commit_with_retry(session)
+                        continue
+
                     if not original_content.strip():
                         continue
 
