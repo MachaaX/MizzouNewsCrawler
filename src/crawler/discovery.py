@@ -3091,6 +3091,7 @@ class NewsDiscovery:
             [
                 urljoin(source_url, "/rss"),
                 urljoin(source_url, "/feed"),
+                urljoin(source_url, "/feed/"),  # WordPress standard (trailing slash)
                 urljoin(source_url, "/rss.xml"),
                 urljoin(source_url, "/feed.xml"),
                 urljoin(source_url, "/index.xml"),
