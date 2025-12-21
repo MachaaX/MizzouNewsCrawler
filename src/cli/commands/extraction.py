@@ -1271,7 +1271,8 @@ def _process_batch(
                     ]
 
                     is_proxy_challenge = any(
-                        pattern in title or (content_text and pattern in content_text[:500])
+                        pattern in title
+                        or (content_text and pattern in content_text[:500])
                         for pattern in proxy_patterns
                     )
 

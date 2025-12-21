@@ -283,9 +283,7 @@ class TestExtractionFlowWithSeleniumOnly:
             "_get_domain_extraction_method",
             return_value=("unblock", "perimeterx"),
         ) as mock_check:
-            with patch.object(
-                extractor, "_extract_with_unblock_proxy"
-            ) as mock_unblock:
+            with patch.object(extractor, "_extract_with_unblock_proxy") as mock_unblock:
                 # Unblock proxy returns challenge error (no mock response configured)
                 mock_unblock.side_effect = ProxyChallengeError(
                     "Proxy challenge detected"
