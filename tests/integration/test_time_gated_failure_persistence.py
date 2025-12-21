@@ -465,12 +465,8 @@ class TestTimeGatedFailurePersistence:
             finally:
                 cloud_sql_session.close()
 
-    def test_different_frequencies_different_gates_postgres(self, cloud_sql_engine):
+    def test_different_frequencies_different_gates_postgres(self, cloud_sql_session):
         """Test that different frequencies have different time gates in PostgreSQL."""
-        from sqlalchemy.orm import sessionmaker
-
-        SessionLocal = sessionmaker(bind=cloud_sql_engine)
-        cloud_sql_session = SessionLocal()
         timestamp = datetime.utcnow().timestamp()
 
         # Create daily, weekly, and monthly sources
@@ -478,79 +474,65 @@ class TestTimeGatedFailurePersistence:
         weekly_id = f"test-weekly-{timestamp}"
         monthly_id = f"test-monthly-{timestamp}"
 
-        try:
-            # All with failures 4 days ago
-            last_seen = datetime.utcnow() - timedelta(days=4)
+        # All with failures 4 days ago
+        last_seen = datetime.utcnow() - timedelta(days=4)
 
-            self._create_test_source(
-                cloud_sql_session, daily_id, "daily.com", "daily", 1, last_seen
-            )
-            self._create_test_source(
-                cloud_sql_session,
-                weekly_id,
-                "weekly.com",
-                "weekly",
-                1,
-                last_seen,
-            )
-            self._create_test_source(
-                cloud_sql_session,
-                monthly_id,
-                "monthly.com",
-                "monthly",
-                1,
-                last_seen,
-            )
+        self._create_test_source(
+            cloud_sql_session, daily_id, "daily.com", "daily", 1, last_seen
+        )
+        self._create_test_source(
+            cloud_sql_session,
+            weekly_id,
+            "weekly.com",
+            "weekly",
+            1,
+            last_seen,
+        )
+        self._create_test_source(
+            cloud_sql_session,
+            monthly_id,
+            "monthly.com",
+            "monthly",
+            1,
+            last_seen,
+        )
 
-            import os
+        import os
 
-            db_url = os.getenv("TEST_DATABASE_URL")
-            if not db_url:
-                pytest.skip("TEST_DATABASE_URL not set")
-            discovery = NewsDiscovery(database_url=db_url)
+        db_url = os.getenv("TEST_DATABASE_URL")
+        if not db_url:
+            pytest.skip("TEST_DATABASE_URL not set")
+        discovery = NewsDiscovery(database_url=db_url)
 
-            # Daily should allow (4 days > 6 hours)
-            daily_count = discovery._increment_no_effective_methods(
-                daily_id,
-                source_meta={"frequency": "daily"},
-            )
-            assert daily_count == 2
+        # Daily should allow (4 days > 6 hours)
+        daily_count = discovery._increment_no_effective_methods(
+            daily_id,
+            source_meta={"frequency": "daily"},
+        )
+        assert daily_count == 2
 
-            # Weekly should block (4 days < 7 days)
-            weekly_count = discovery._increment_no_effective_methods(
-                weekly_id,
-                source_meta={"frequency": "weekly"},
-            )
-            assert weekly_count == 1
+        # Weekly should block (4 days < 7 days)
+        weekly_count = discovery._increment_no_effective_methods(
+            weekly_id,
+            source_meta={"frequency": "weekly"},
+        )
+        assert weekly_count == 1
 
-            # Monthly should block (4 days < 30 days)
-            monthly_count = discovery._increment_no_effective_methods(
-                monthly_id,
-                source_meta={"frequency": "monthly"},
-            )
-            assert monthly_count == 1
+        # Monthly should block (4 days < 30 days)
+        monthly_count = discovery._increment_no_effective_methods(
+            monthly_id,
+            source_meta={"frequency": "monthly"},
+        )
+        assert monthly_count == 1
 
-            # Verify PostgreSQL states
-            daily_state = self._query_source_state(cloud_sql_session, daily_id)
-            weekly_state = self._query_source_state(cloud_sql_session, weekly_id)
-            monthly_state = self._query_source_state(cloud_sql_session, monthly_id)
+        # Verify PostgreSQL states
+        daily_state = self._query_source_state(cloud_sql_session, daily_id)
+        weekly_state = self._query_source_state(cloud_sql_session, weekly_id)
+        monthly_state = self._query_source_state(cloud_sql_session, monthly_id)
 
-            assert daily_state["counter"] == 2  # Incremented
-            assert weekly_state["counter"] == 1  # Blocked
-            assert monthly_state["counter"] == 1  # Blocked
-
-        finally:
-            try:
-                from src.models import Source as SourceCleanup
-
-                cloud_sql_session.query(SourceCleanup).filter_by(id=daily_id).delete()
-                cloud_sql_session.query(SourceCleanup).filter_by(id=weekly_id).delete()
-                cloud_sql_session.query(SourceCleanup).filter_by(id=monthly_id).delete()
-                cloud_sql_session.commit()
-            except Exception:
-                cloud_sql_session.rollback()
-            finally:
-                cloud_sql_session.close()
+        assert daily_state["counter"] == 2  # Incremented
+        assert weekly_state["counter"] == 1  # Blocked
+        assert monthly_state["counter"] == 1  # Blocked
 
     def test_legacy_metadata_also_updated_postgres(self, cloud_sql_engine):
         """Test that legacy JSON metadata is also updated for compatibility."""
