@@ -2208,3 +2208,115 @@ def test_run_discovery_uuid_filter_returns_empty(
     }
     assert telemetry.outcomes == []
     assert telemetry.failures == []
+
+
+def test_get_existing_urls_filters_by_source_host(monkeypatch):
+    """Test that _get_existing_urls correctly filters URLs by source hostname.
+    
+    Verifies:
+    1. When source_host is provided, only returns URLs containing that host
+    2. Filters out URLs from different sources
+    3. When source_host is None, returns all URLs (backward compatibility)
+    """
+    # Create a mock result set with URLs from multiple sources
+    class MockRow:
+        def __init__(self, url):
+            self._url = url
+        
+        def __getitem__(self, idx):
+            return self._url
+    
+    class MockResult:
+        def __init__(self, urls):
+            self._urls = urls
+        
+        def fetchall(self):
+            return [MockRow(url) for url in self._urls]
+    
+    # Test data: URLs from different sources
+    all_urls = [
+        "https://www.nwmissourinews.com/news/article_123.html",
+        "https://www.nwmissourinews.com/opinion/article_456.html",
+        "https://www.example.com/news/story-1.html",
+        "https://www.example.com/sports/story-2.html",
+        "https://www.othersite.com/article.html",
+    ]
+    
+    # Mock the database connection and execute behavior
+    executed_queries = []
+    
+    class MockConnection:
+        def __enter__(self):
+            return self
+        
+        def __exit__(self, *args):
+            pass
+    
+    class MockEngine:
+        def connect(self):
+            return MockConnection()
+    
+    class MockDatabaseManager:
+        def __init__(self, *args, **kwargs):
+            self.engine = MockEngine()
+    
+    def mock_safe_execute(conn, query, params=None):
+        """Track executed queries and return appropriate results."""
+        executed_queries.append({"query": str(query), "params": params})
+        
+        if params and "pattern" in params:
+            # Filter URLs based on LIKE pattern
+            pattern = params["pattern"].replace("%", "")
+            filtered = [url for url in all_urls if pattern in url]
+            return MockResult(filtered)
+        else:
+            # Return all URLs
+            return MockResult(all_urls)
+    
+    # Apply mocks
+    monkeypatch.setattr(
+        "src.crawler.discovery.DatabaseManager",
+        MockDatabaseManager
+    )
+    monkeypatch.setattr(
+        "src.crawler.discovery.safe_execute",
+        mock_safe_execute
+    )
+    
+    # Create discovery instance
+    discovery = _make_discovery_stub()
+    discovery.database_url = "mock://db"
+    
+    # Test 1: Filter by www.nwmissourinews.com
+    executed_queries.clear()
+    result = discovery._get_existing_urls(source_host="www.nwmissourinews.com")
+    
+    assert len(executed_queries) == 1
+    assert "WHERE url LIKE :pattern" in executed_queries[0]["query"]
+    assert executed_queries[0]["params"]["pattern"] == "%www.nwmissourinews.com%"
+    assert len(result) == 2
+    assert all("nwmissourinews.com" in url for url in result)
+    
+    # Test 2: Filter by www.example.com
+    executed_queries.clear()
+    result = discovery._get_existing_urls(source_host="www.example.com")
+    
+    assert len(executed_queries) == 1
+    assert executed_queries[0]["params"]["pattern"] == "%www.example.com%"
+    assert len(result) == 2
+    assert all("example.com" in url for url in result)
+    
+    # Test 3: No source_host provided - should return all URLs
+    executed_queries.clear()
+    result = discovery._get_existing_urls(source_host=None)
+    
+    assert len(executed_queries) == 1
+    assert "WHERE url LIKE :pattern" not in executed_queries[0]["query"]
+    assert executed_queries[0]["params"] is None
+    assert len(result) == 5  # All URLs
+    
+    # Test 4: Filter by hostname with no matches
+    executed_queries.clear()
+    result = discovery._get_existing_urls(source_host="nonexistent.com")
+    
+    assert len(result) == 0

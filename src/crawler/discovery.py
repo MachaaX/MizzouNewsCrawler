@@ -2419,7 +2419,6 @@ class NewsDiscovery:
             
             # Extract article URLs based on site-specific patterns
             html = response.text
-            article_urls: list[str] = []
             
             # Site-specific patterns (can be expanded)
             patterns = {
