@@ -459,7 +459,7 @@ class TestUnblockProxyMethod:
 
         metrics.set_proxy_metrics.assert_called_once()
         call_kwargs = metrics.set_proxy_metrics.call_args.kwargs
-        assert call_kwargs["proxy_status"] == "challenge_page"
+        assert call_kwargs["proxy_status"] == "failed"
         assert call_kwargs["proxy_error"] == "challenge_page"
 
     def test_unblock_proxy_fallback_succeeds_after_challenge(
