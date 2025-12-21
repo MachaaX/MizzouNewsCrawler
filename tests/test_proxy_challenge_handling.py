@@ -288,8 +288,8 @@ class TestProxyChallengeMetrics:
             # Verify metrics recorded the proxy challenge
             # Note: metrics.set_proxy_metrics() is called before exception is raised
             assert metrics.proxy_used is True
-            # Proxy status is set by set_proxy_metrics call
-            assert metrics.proxy_status == "challenge_page"
+            # Proxy status is set to "failed" for all failure modes
+            assert metrics.proxy_status == 2  # PROXY_STATUS_FAILED
 
 
 class TestProxyChallengePatterns:

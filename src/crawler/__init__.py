@@ -3013,11 +3013,7 @@ class ContentExtractor:
                             f"Unblock proxy returned challenge page for {url}; marking for retry (no fallback)"
                         )
 
-                    proxy_status = (
-                        "challenge_page"
-                        if challenge_detected
-                        else ("failed" if response is None else "small_response")
-                    )
+                    proxy_status = "failed"  # All failure modes map to "failed" status
                     proxy_error = (
                         "challenge_page"
                         if challenge_detected
