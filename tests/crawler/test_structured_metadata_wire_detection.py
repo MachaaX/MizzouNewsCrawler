@@ -137,7 +137,8 @@ class TestCanonicalUrlCrossDomainDetection:
         </html>
         """
         result = extractor._detect_structured_metadata_wire_from_html(
-            html, article_url="https://www.kmbc.com/article/mit-professor-shot-brookline-brown-university-shooting-possible-link/69811635"
+            html,
+            article_url="https://www.kmbc.com/article/mit-professor-shot-brookline-brown-university-shooting-possible-link/69811635",
         )
 
         # Different domain should trigger syndication detection

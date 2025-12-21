@@ -91,7 +91,7 @@ def test_should_schedule_discovery_broadcast_uses_12_hour_window():
     "frequency,delta_hours,expected",
     [
         ("weekly", 24 * 3, False),  # 3 days < 3.5 days, not due yet
-        ("weekly", 24 * 4, True),   # 4 days > 3.5 days, due for discovery
+        ("weekly", 24 * 4, True),  # 4 days > 3.5 days, due for discovery
         ("monthly", 24 * 20, False),
         ("monthly", 24 * 35, True),
         (None, 24 * 5, False),

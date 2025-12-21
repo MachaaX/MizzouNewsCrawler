@@ -1259,7 +1259,7 @@ def _process_batch(
                 if content and content.get("title"):
                     title = content.get("title", "")
                     content_text = content.get("content", "")
-                    
+
                     # Proxy challenge patterns
                     proxy_patterns = [
                         "Access to this page has been denied",
@@ -1269,12 +1269,12 @@ def _process_batch(
                         "Checking your browser",
                         "Access Denied",
                     ]
-                    
+
                     is_proxy_challenge = any(
                         pattern in title or pattern in content_text[:500]
                         for pattern in proxy_patterns
                     )
-                    
+
                     if is_proxy_challenge:
                         logger.warning(
                             "🚫 Proxy/bot challenge detected for %s (title: %s)",
@@ -1292,14 +1292,14 @@ def _process_batch(
                         except Exception:
                             logger.exception("Failed to mark URL as proxy_blocked")
                             session.rollback()
-                        
+
                         error_msg = f"Proxy challenge detected: {title[:100]}"
                         metrics.error_message = error_msg
                         metrics.error_type = "proxy_blocked"
                         metrics.finalize(content)
                         telemetry.record_extraction(metrics)
                         continue
-                
+
                 if content and content.get("title"):
                     # Track successful extraction from this domain
                     domain_article_count[domain] = (
@@ -1790,7 +1790,7 @@ def _process_batch(
                     # This allows the article to be picked up again after cooldown period
                     logger.info(
                         "Keeping article %s in 'article' status for retry after cooldown",
-                        url
+                        url,
                     )
                     # Optionally: could add last_attempt_at timestamp to track cooldown
                     # For now, rely on natural batch rotation to provide cooldown
@@ -2052,7 +2052,9 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                 try:
                     row = safe_session_execute(
                         session,
-                        text("SELECT title, content, status FROM articles WHERE id = :id"),
+                        text(
+                            "SELECT title, content, status FROM articles WHERE id = :id"
+                        ),
                         {"id": article_id},
                     ).fetchone()
 
@@ -2062,7 +2064,7 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                     title = row[0] or ""
                     original_content = row[1] or ""
                     current_status = row[2] or "extracted"
-                    
+
                     # Check for proxy/bot challenge in title or content
                     proxy_patterns = [
                         "Access to this page has been denied",
@@ -2072,12 +2074,12 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                         "Checking your browser",
                         "Access Denied",
                     ]
-                    
+
                     is_proxy_challenge = any(
                         pattern in title or pattern in original_content[:500]
                         for pattern in proxy_patterns
                     )
-                    
+
                     if is_proxy_challenge:
                         logger.warning(
                             "🚫 Proxy challenge during cleaning: %s (title: %s)",
@@ -2092,7 +2094,7 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                         )
                         _commit_with_retry(session)
                         continue
-                    
+
                     if not original_content.strip():
                         continue
 

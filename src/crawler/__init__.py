@@ -48,7 +48,7 @@ class NotFoundError(Exception):
 
 class ProxyChallengeError(Exception):
     """Exception raised when proxy returns a challenge/block page.
-    
+
     Indicates anti-bot protection that requires cooldown and retry.
     Should NOT trigger fallback to other extraction methods.
     """
@@ -4539,7 +4539,7 @@ class ContentExtractor:
                                 if canonical_domain.endswith("." + domain):
                                     wire_name = service
                                     break
-                        
+
                         if wire_name:
                             # Known wire service
                             detection_methods.append("canonical_cross_domain")
@@ -4553,7 +4553,9 @@ class ContentExtractor:
                             # (e.g., Hearst TV stations syndicating between each other)
                             detection_methods.append("canonical_cross_domain")
                             raw_sources.append(canonical_domain)
-                            evidence.append(f"canonical={canonical_url[:100]} (cross-domain)")
+                            evidence.append(
+                                f"canonical={canonical_url[:100]} (cross-domain)"
+                            )
                             wire_services.append(canonical_domain)
             except Exception:
                 pass  # URL parsing failed, continue with other methods

@@ -65,12 +65,14 @@ class URLVerificationService:
             return self._url_path_filters
 
         result = session.execute(
-            text("""
+            text(
+                """
                 SELECT path_pattern, filter_type, reason
                 FROM url_path_filters
                 WHERE active = true
                 ORDER BY path_pattern
-            """)
+            """
+            )
         )
         self._url_path_filters = [
             {"pattern": row[0], "type": row[1], "reason": row[2]}
@@ -82,20 +84,20 @@ class URLVerificationService:
 
     def _matches_path_filter(self, url: str, filters: list) -> tuple[bool, str | None]:
         """Check if URL matches any path filter.
-        
+
         Returns:
             (is_filtered, reason) tuple
         """
         from urllib.parse import urlparse
-        
+
         parsed = urlparse(url)
         path = parsed.path
-        
+
         for filter_config in filters:
             pattern = filter_config["pattern"]
             filter_type = filter_config["type"]
             reason = filter_config["reason"]
-            
+
             if filter_type == "prefix" and path.startswith(pattern):
                 return True, reason
             elif filter_type == "suffix" and path.endswith(pattern):
@@ -104,9 +106,10 @@ class URLVerificationService:
                 return True, reason
             elif filter_type == "regex":
                 import re
+
                 if re.search(pattern, path):
                     return True, reason
-        
+
         return False, None
 
     def start_verification_job(
@@ -178,11 +181,9 @@ class URLVerificationService:
                 if is_filtered:
                     result["storysniffer_result"] = False
                     result["verification_time_ms"] = (time.time() - start_time) * 1000
-                    self.logger.debug(
-                        f"Filtered URL {url}: {reason or 'path filter'}"
-                    )
+                    self.logger.debug(f"Filtered URL {url}: {reason or 'path filter'}")
                     return result
-            
+
             # Run StorySniffer verification
             is_article = self.sniffer.guess(url)
             result["storysniffer_result"] = bool(is_article)

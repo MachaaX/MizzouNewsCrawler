@@ -411,8 +411,8 @@ class WireService(Base):
 
 class UrlPathFilter(Base):
     """URL path patterns to exclude from article verification.
-    
-    Stores URL path prefixes that indicate non-article content (videos, 
+
+    Stores URL path prefixes that indicate non-article content (videos,
     galleries, tags, etc.) to filter before StorySniffer verification.
     """
 

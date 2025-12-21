@@ -10,7 +10,7 @@ Tests for ProxyChallengeError exception:
 import os
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -34,9 +34,7 @@ def extractor():
 def mock_proxy_response():
     """Create a mock proxy response object."""
 
-    def _create_response(
-        status_code=200, text="", challenge=False, small_html=False
-    ):
+    def _create_response(status_code=200, text="", challenge=False, small_html=False):
         response = Mock()
         response.status_code = status_code
 
@@ -283,7 +281,11 @@ class TestProxyChallengeMetrics:
             # Note: metrics.set_proxy_metrics() is called before exception is raised
             assert metrics.proxy_used is True
             # Can be 'challenge_page', 'failed', or 'small_response'
-            assert metrics.proxy_status in ["challenge_page", "failed", "small_response"]
+            assert metrics.proxy_status in [
+                "challenge_page",
+                "failed",
+                "small_response",
+            ]
 
 
 class TestProxyChallengePatterns:
@@ -304,7 +306,7 @@ class TestProxyChallengePatterns:
         self, extractor, challenge_text, mock_proxy_response
     ):
         """Test that various challenge page patterns are detected.
-        
+
         NOTE: Currently only 'Access to this page has been denied' is detected.
         Other patterns would require enhancement to the detection logic.
         """
@@ -324,7 +326,9 @@ class TestProxyChallengePatterns:
             mock_response.status_code = 200
             # Make HTML large enough to pass UNBLOCK_MIN_HTML_BYTES threshold
             padding = "x" * 4000
-            mock_response.text = f"<html><body><h1>{challenge_text}</h1>{padding}</body></html>"
+            mock_response.text = (
+                f"<html><body><h1>{challenge_text}</h1>{padding}</body></html>"
+            )
             mock_get.return_value = mock_response
 
             url = "https://www.fourstateshomepage.com/test"
