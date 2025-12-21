@@ -276,20 +276,24 @@ class TestExtractionFlowWithSeleniumOnly:
         """extract_content should check extraction_method at start."""
         extractor = ContentExtractor()
 
+        from src.crawler import ProxyChallengeError
+
         with patch.object(
             extractor,
             "_get_domain_extraction_method",
             return_value=("unblock", "perimeterx"),
         ) as mock_check:
-            with patch.object(extractor, "_extract_with_selenium") as mock_selenium:
-                mock_selenium.return_value = {
-                    "title": "Test Article",
-                    "text": "Article content here with enough words to be valid.",
-                    "authors": ["John Doe"],
-                }
+            with patch.object(
+                extractor, "_extract_with_unblock_proxy"
+            ) as mock_unblock:
+                # Unblock proxy returns challenge error (no mock response configured)
+                mock_unblock.side_effect = ProxyChallengeError(
+                    "Proxy challenge detected"
+                )
 
-                # Call extract_content - it should skip HTTP methods
-                extractor.extract_content("https://fox4kc.com/news/story")
+                # Call extract_content - should raise ProxyChallengeError (no fallback)
+                with pytest.raises(ProxyChallengeError):
+                    extractor.extract_content("https://fox4kc.com/news/story")
 
                 # Verify selenium_only check was made
                 mock_check.assert_called_once_with("fox4kc.com")

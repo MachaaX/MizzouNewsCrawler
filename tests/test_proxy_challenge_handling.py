@@ -272,20 +272,19 @@ class TestProxyChallengeMetrics:
             mock_get.return_value = mock_response
 
             # Should raise ProxyChallengeError
-            with pytest.raises(ProxyChallengeError):
+            with pytest.raises(ProxyChallengeError) as exc_info:
                 extractor._extract_with_unblock_proxy(
                     "https://fox4kc.com/test", metrics=metrics
                 )
 
+            # Verify exception message indicates challenge
+            assert "challenge_page" in str(exc_info.value)
+
             # Verify metrics recorded the proxy challenge
             # Note: metrics.set_proxy_metrics() is called before exception is raised
             assert metrics.proxy_used is True
-            # Can be 'challenge_page', 'failed', or 'small_response'
-            assert metrics.proxy_status in [
-                "challenge_page",
-                "failed",
-                "small_response",
-            ]
+            # Proxy status is set by set_proxy_metrics call
+            assert metrics.proxy_status == "challenge_page"
 
 
 class TestProxyChallengePatterns:
