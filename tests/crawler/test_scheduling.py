@@ -20,7 +20,7 @@ import src.crawler.scheduling as scheduling
         ("Daily updates", 0.25),
         ("Broadcast", 0.25),
         ("Bi-weekly", 14),
-        ("Weekly", 7),
+        ("Weekly", 3.5),  # Weekly publications: run discovery twice per week
         ("Triweekly", 7),
         ("Monthly", 30),
         ("Hourly", 1),

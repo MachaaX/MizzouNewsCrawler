@@ -60,7 +60,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.crawler import UNBLOCK_MIN_HTML_BYTES, ContentExtractor
+from src.crawler import UNBLOCK_MIN_HTML_BYTES, ContentExtractor, ProxyChallengeError
 from src.crawler.utils import mask_proxy_url
 from src.utils.comprehensive_telemetry import ExtractionMetrics
 
@@ -441,7 +441,7 @@ class TestUnblockProxyMethod:
     def test_unblock_proxy_detects_challenge_and_updates_metrics(
         self, mock_env_vars, monkeypatch
     ):
-        """Challenge pages should mark proxy metrics and abort content usage."""
+        """Challenge pages should raise ProxyChallengeError and mark proxy metrics."""
         extractor = ContentExtractor()
         metrics = MagicMock(spec=ExtractionMetrics)
 
@@ -451,12 +451,12 @@ class TestUnblockProxyMethod:
 
         monkeypatch.setattr("requests.post", lambda *args, **kwargs: mock_response)
 
-        result = extractor._extract_with_unblock_proxy(
-            "https://blocked.example/article",
-            metrics=metrics,
-        )
+        with pytest.raises(ProxyChallengeError, match="challenge_page"):
+            extractor._extract_with_unblock_proxy(
+                "https://blocked.example/article",
+                metrics=metrics,
+            )
 
-        assert result == {}
         metrics.set_proxy_metrics.assert_called_once()
         call_kwargs = metrics.set_proxy_metrics.call_args.kwargs
         assert call_kwargs["proxy_status"] == "challenge_page"
@@ -530,7 +530,7 @@ class TestUnblockProxyMethod:
         assert call_kwargs["proxy_authenticated"] is True
 
     def test_blocked_response_returns_empty(self, mock_env_vars, monkeypatch):
-        """Should return empty dict if still blocked by bot protection."""
+        """Should raise ProxyChallengeError if still blocked by bot protection."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
@@ -544,12 +544,11 @@ class TestUnblockProxyMethod:
         """
 
         with patch("requests.get", return_value=mock_response):
-            result = extractor._extract_with_unblock_proxy("https://test.com/article")
-
-        assert result == {}
+            with pytest.raises(ProxyChallengeError, match="challenge_page"):
+                extractor._extract_with_unblock_proxy("https://test.com/article")
 
     def test_small_response_returns_empty(self, mock_env_vars, monkeypatch):
-        """Should return empty dict if response is below minimum size."""
+        """Should raise ProxyChallengeError if response is below minimum size."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
@@ -558,19 +557,17 @@ class TestUnblockProxyMethod:
         mock_response.text = "<html><body>Small</body></html>"
 
         with patch("requests.get", return_value=mock_response):
-            result = extractor._extract_with_unblock_proxy("https://test.com/article")
-
-        assert result == {}
+            with pytest.raises(ProxyChallengeError, match="small_response"):
+                extractor._extract_with_unblock_proxy("https://test.com/article")
 
     def test_network_error_returns_empty(self, mock_env_vars, monkeypatch):
-        """Should return empty dict on network errors."""
+        """Should raise ProxyChallengeError on network errors."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         with patch("requests.get", side_effect=Exception("Connection timeout")):
-            result = extractor._extract_with_unblock_proxy("https://test.com/article")
-
-        assert result == {}
+            with pytest.raises(ProxyChallengeError, match="no_response"):
+                extractor._extract_with_unblock_proxy("https://test.com/article")
 
     def test_unblock_proxy_prefers_api_post(self, mock_env_vars, monkeypatch):
         """When UNBLOCK_PREFER_API_POST is true, prefer POST to API as primary attempt."""
@@ -1017,14 +1014,13 @@ class TestEdgeCases:
             assert isinstance(result, dict)
 
     def test_timeout_handled_gracefully(self, mock_env_vars, monkeypatch):
-        """Should handle request timeouts gracefully."""
+        """Should raise ProxyChallengeError on request timeouts."""
         extractor = ContentExtractor()
         monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "false")
 
         with patch("requests.get", side_effect=Exception("Timeout")):
-            result = extractor._extract_with_unblock_proxy("https://test.com/article")
-
-            assert result == {}
+            with pytest.raises(ProxyChallengeError, match="no_response"):
+                extractor._extract_with_unblock_proxy("https://test.com/article")
 
     def test_empty_proxy_credentials_uses_defaults(self, monkeypatch):
         """Should use default values when environment variables are missing."""
