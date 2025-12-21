@@ -306,6 +306,8 @@ class BylineCleaner:
         "interviews",
         "profile",
         "profiles",
+        "content",
+        "digital",
         # Time/status indicators
         "former",
         "current",
