@@ -567,6 +567,11 @@ class ContentExtractor:
         self._persistent_driver = None
         self._driver_creation_count = 0
         self._driver_reuse_count = 0
+        # Max number of reuses before recreating driver to prevent memory leak
+        # from accumulated Chrome renderer processes
+        self._driver_reuse_limit = int(
+            os.environ.get("SELENIUM_DRIVER_REUSE_LIMIT", "10")
+        )
 
         # User agent pool for rotation - updated with latest browser versions
         # for better anti-detection (October 2025)
@@ -1405,7 +1410,22 @@ class ContentExtractor:
         logger.info("Cleared all domain sessions and rotation state")
 
     def get_persistent_driver(self):
-        """Get or create a persistent Selenium driver for reuse."""
+        """Get or create a persistent Selenium driver for reuse.
+        
+        Automatically recreates the driver after reaching the reuse limit
+        to prevent memory leaks from accumulated Chrome renderer processes.
+        """
+        # Check if driver needs recreation due to reuse limit
+        if (
+            self._persistent_driver is not None
+            and self._driver_reuse_count >= self._driver_reuse_limit
+        ):
+            logger.info(
+                f"Driver reached reuse limit ({self._driver_reuse_limit}), "
+                f"recreating to clean up renderer processes"
+            )
+            self.close_persistent_driver()
+
         if self._persistent_driver is None:
             logger.info("Creating new persistent ChromeDriver for reuse")
             try:
@@ -1467,6 +1487,7 @@ class ContentExtractor:
             "has_persistent_driver": self._persistent_driver is not None,
             "driver_creation_count": self._driver_creation_count,
             "driver_reuse_count": self._driver_reuse_count,
+            "driver_reuse_limit": self._driver_reuse_limit,
             "driver_method": getattr(self, "_driver_method", None),
         }
 

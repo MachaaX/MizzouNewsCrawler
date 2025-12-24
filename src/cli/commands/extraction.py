@@ -101,13 +101,23 @@ logger = logging.getLogger(__name__)
 
 
 def _initial_wire_check_status(article_status: str) -> str:
-    """Determine the wire_check_status value for newly inserted articles."""
+    """Determine the wire_check_status value for newly inserted articles.
+    
+    IMPORTANT: Default to 'pending' for all articles except those that explicitly
+    don't need checking (errors, paywalls). This ensures MediaCloud verification
+    runs even if article_status is set incorrectly during extraction.
+    """
 
     if not ENABLE_MEDIACLOUD_WIRE_CHECK:
         return WIRE_CHECK_STATUS_COMPLETE
-    if article_status in WIRE_CHECK_INITIAL_PENDING_STATUSES:
-        return WIRE_CHECK_STATUS_PENDING
-    return WIRE_CHECK_STATUS_COMPLETE
+    
+    # Only skip wire check for statuses that explicitly don't need it
+    if article_status in {"error", "paywall", "obituary", "opinion"}:
+        return WIRE_CHECK_STATUS_COMPLETE
+    
+    # Default to pending for safety - includes "extracted", "wire", "cleaned", "labeled"
+    # This ensures even incorrectly-set "wire" status gets verified
+    return WIRE_CHECK_STATUS_PENDING
 
 
 def _get_worker_id() -> str:
@@ -2047,6 +2057,13 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                     logger.warning(
                         "Domain analysis failed for %s: %s", domain, error_str
                     )
+                # Rollback transaction if it's in an aborted state (PostgreSQL error 25P02)
+                if "25P02" in error_str or "transaction is aborted" in error_str:
+                    try:
+                        session.rollback()
+                        logger.debug("Rolled back aborted transaction for domain %s", domain)
+                    except Exception as rollback_error:
+                        logger.warning("Failed to rollback transaction: %s", rollback_error)
                 # Continue with cleaning even if analysis fails
 
             for article_id in article_ids:

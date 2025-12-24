@@ -21,6 +21,8 @@ def _default_driver_stats():
         "has_persistent_driver": False,
         "driver_reuse_count": 0,
         "driver_creation_count": 0,
+        "driver_reuse_limit": 10,
+        "driver_method": None,
     }
 
 
