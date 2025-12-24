@@ -283,18 +283,23 @@ TEST_EXIT_CODE=${PIPESTATUS[0]}  # Gets exit code of docker run, not grep
 set -e   # Re-enable exit-on-error
 
 # Check if tests failed (not just coverage)
-# Exit code 1 = test failures, Exit code 2 = coverage failure but tests passed
+# Exit code 0 = all passed with sufficient coverage
+# Exit code 1 = test failures
+# Exit code 2 = tests passed but coverage below threshold
+COVERAGE_BELOW_THRESHOLD=false
 if [ $TEST_EXIT_CODE -eq 1 ]; then
-    echo -e "${RED}❌ Unit + integration tests FAILED (test failures, not coverage)${NC}"
+    echo -e "${RED}❌ Unit + integration tests FAILED (actual test failures)${NC}"
     exit 1
 elif [ $TEST_EXIT_CODE -eq 2 ]; then
     echo -e "${YELLOW}⚠️  Unit + integration tests passed but coverage is below 78%${NC}"
-    echo -e "${YELLOW}   Continuing to run PostgreSQL tests anyway...${NC}"
+    echo -e "${YELLOW}   Continuing to run PostgreSQL tests...${NC}"
+    COVERAGE_BELOW_THRESHOLD=true
+elif [ $TEST_EXIT_CODE -eq 0 ]; then
+    echo -e "${GREEN}✅ Step 4/5: Unit + integration tests passed with sufficient coverage${NC}"
 elif [ $TEST_EXIT_CODE -ne 0 ]; then
-    echo -e "${RED}❌ Unit + integration tests failed with exit code $TEST_EXIT_CODE${NC}"
+    echo -e "${RED}❌ Unit + integration tests failed with unexpected exit code $TEST_EXIT_CODE${NC}"
     exit 1
 fi
-echo -e "${GREEN}✅ Step 4/5: Unit + integration tests passed${NC}"
 
 # Step 8: Run PostgreSQL integration tests (like CI postgres-integration job)
 echo ""
@@ -333,13 +338,25 @@ fi
 echo -e "${GREEN}✅ Step 5/5: PostgreSQL integration tests passed${NC}"
 
 echo ""
-echo -e "${GREEN}🎉 All local CI checks passed!${NC}"
-echo "   ✅ Linting (ruff, black, isort)"
-echo "   ✅ Type checking (mypy)"
-echo "   ✅ Workflow template validation"
-echo "   ✅ Database migrations"
-echo "   ✅ Unit + integration tests with 78% coverage threshold (aggregate)"
-echo "   ✅ PostgreSQL integration tests"
+if [ "$COVERAGE_BELOW_THRESHOLD" = true ]; then
+    echo -e "${YELLOW}⚠️  All tests passed but coverage is below 78%${NC}"
+    echo "   ✅ Linting (ruff, black, isort)"
+    echo "   ✅ Type checking (mypy)"
+    echo "   ✅ Workflow template validation"
+    echo "   ✅ Database migrations"
+    echo "   ✅ Unit + integration tests (but coverage < 78%)"
+    echo "   ✅ PostgreSQL integration tests"
+    echo ""
+    echo -e "${YELLOW}⚠️  Push will succeed but consider adding test coverage${NC}"
+else
+    echo -e "${GREEN}🎉 All local CI checks passed!${NC}"
+    echo "   ✅ Linting (ruff, black, isort)"
+    echo "   ✅ Type checking (mypy)"
+    echo "   ✅ Workflow template validation"
+    echo "   ✅ Database migrations"
+    echo "   ✅ Unit + integration tests with 78% coverage threshold (aggregate)"
+    echo "   ✅ PostgreSQL integration tests"
+fi
 echo ""
 echo "💡 To debug interactively:"
 echo "   docker exec -it $POSTGRES_CONTAINER psql -U $POSTGRES_USER -d $POSTGRES_DB"
