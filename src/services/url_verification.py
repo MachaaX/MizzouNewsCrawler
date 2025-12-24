@@ -561,18 +561,8 @@ class URLVerificationService:
             )
             return result
 
-        from src.utils.url_classifier import is_likely_article_url
-
-        if not is_likely_article_url(url):
-            # URL matches non-article pattern (gallery, category, etc.)
-            result["storysniffer_result"] = False
-            result["pattern_filtered"] = True
-            result["verification_time_ms"] = (time.time() - start_time) * 1000
-            self.logger.debug(
-                f"Filtered non-article by URL pattern: {url} "
-                f"({result['verification_time_ms']:.1f}ms)"
-            )
-            return result
+        # Note: is_likely_article_url() fallback removed - all patterns now in database
+        # Stage 1 filtering complete, proceed to Stage 2 (HTTP/StorySniffer)
 
         # Branching behavior: by default we run StorySniffer first and
         # short-circuit (this matches test expectations). When

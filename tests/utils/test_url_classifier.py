@@ -1,4 +1,10 @@
-"""Tests for URL classification utilities."""
+"""Tests for URL classification utilities.
+
+NOTE: Pattern matching has been migrated to verification_patterns database table.
+The primary filtering logic now uses URLVerificationService with database patterns.
+"""
+
+import pytest
 
 from src.utils.url_classifier import (
     COMPILED_NON_ARTICLE_PATTERNS,
@@ -10,6 +16,23 @@ from src.utils.url_classifier import (
 class TestIsLikelyArticleUrl:
     """Tests for is_likely_article_url function."""
 
+    def test_allows_all_urls_after_pattern_migration(self):
+        """Test that function allows all URLs (patterns moved to database)."""
+        # After migration, this function has no hardcoded patterns
+        test_urls = [
+            "https://example.com/news/breaking-story",
+            "https://example.com/video/watch",
+            "https://example.com/category/sports",
+            "https://example.com/photos/gallery",
+        ]
+
+        for url in test_urls:
+            # All URLs pass through - filtering done by database patterns
+            assert is_likely_article_url(url)
+
+    @pytest.mark.skip(
+        reason="Patterns migrated to database - test no longer applicable"
+    )
     def test_identifies_likely_article_urls(self):
         """Test that normal article URLs are classified correctly."""
         article_urls = [
@@ -27,6 +50,9 @@ class TestIsLikelyArticleUrl:
                 url
             ), f"Expected {url} to be classified as article"
 
+    @pytest.mark.skip(
+        reason="Patterns migrated to database - test no longer applicable"
+    )
     def test_filters_video_gallery_urls(self):
         """Test that video/photo gallery URLs are filtered."""
         gallery_urls = [
@@ -44,6 +70,9 @@ class TestIsLikelyArticleUrl:
                 url
             ), f"Expected {url} to be filtered as gallery"
 
+    @pytest.mark.skip(
+        reason="Patterns migrated to database - test no longer applicable"
+    )
     def test_filters_category_and_listing_urls(self):
         """Test that category/listing URLs are filtered."""
         category_urls = [
@@ -60,6 +89,9 @@ class TestIsLikelyArticleUrl:
                 url
             ), f"Expected {url} to be filtered as category"
 
+    @pytest.mark.skip(
+        reason="Patterns migrated to database - test no longer applicable"
+    )
     def test_filters_static_service_pages(self):
         """Test that static/service pages are filtered."""
         static_urls = [
@@ -81,6 +113,9 @@ class TestIsLikelyArticleUrl:
                 url
             ), f"Expected {url} to be filtered as static"
 
+    @pytest.mark.skip(
+        reason="Patterns migrated to database - test no longer applicable"
+    )
     def test_filters_technical_urls(self):
         """Test that technical URLs are filtered."""
         technical_urls = [
@@ -98,6 +133,9 @@ class TestIsLikelyArticleUrl:
                 url
             ), f"Expected {url} to be filtered as technical"
 
+    @pytest.mark.skip(
+        reason="Pattern matching migrated to database (verification_patterns table)"
+    )
     def test_case_insensitive_matching(self):
         """Test that pattern matching is case-insensitive."""
         urls_with_mixed_case = [
@@ -112,6 +150,9 @@ class TestIsLikelyArticleUrl:
                 url
             ), f"Expected {url} to be filtered (case-insensitive)"
 
+    @pytest.mark.skip(
+        reason="Pattern matching migrated to database (verification_patterns table)"
+    )
     def test_handles_malformed_urls_gracefully(self):
         """Test that malformed URLs don't crash (conservative: return True)."""
         malformed_urls = [
@@ -157,6 +198,9 @@ class TestIsLikelyArticleUrl:
                 url
             ), f"Expected {url} to pass (no exact pattern match)"
 
+    @pytest.mark.skip(
+        reason="Pattern matching migrated to database (verification_patterns table)"
+    )
     def test_about_pattern_edge_cases(self):
         """Test edge cases with 'about' keyword."""
         # '/about' should be filtered (static page)
@@ -171,6 +215,9 @@ class TestIsLikelyArticleUrl:
 class TestClassifyUrlBatch:
     """Tests for classify_url_batch function."""
 
+    @pytest.mark.skip(
+        reason="Pattern matching migrated to database (verification_patterns table)"
+    )
     def test_classifies_mixed_batch(self):
         """Test batch classification with mixed article and non-article URLs."""
         urls = [
@@ -209,6 +256,9 @@ class TestClassifyUrlBatch:
         assert len(likely_articles) == 3
         assert len(filtered_out) == 0
 
+    @pytest.mark.skip(
+        reason="Pattern matching migrated to database (verification_patterns table)"
+    )
     def test_all_filtered_batch(self):
         """Test batch with all non-article URLs."""
         urls = [
@@ -249,6 +299,9 @@ class TestClassifyUrlBatch:
         assert likely_articles[2] == "https://example.com/news/article-3"
 
 
+@pytest.mark.skip(
+    reason="Pattern matching migrated to database (verification_patterns table)"
+)
 class TestCompiledPatterns:
     """Tests for compiled regex patterns."""
 

@@ -70,17 +70,19 @@ def run_migrations_online() -> None:
 
     """
     # Check if we should use Cloud SQL Python Connector
-    use_cloud_sql = (getattr(app_config, 'USE_CLOUD_SQL_CONNECTOR', False) and
-                     getattr(app_config, 'CLOUD_SQL_INSTANCE', None))
-    
+    use_cloud_sql = getattr(app_config, "USE_CLOUD_SQL_CONNECTOR", False) and getattr(
+        app_config, "CLOUD_SQL_INSTANCE", None
+    )
+
     if use_cloud_sql:
         # Use Cloud SQL Python Connector (no proxy needed)
         from src.models.cloud_sql_connector import create_cloud_sql_engine
+
         connectable = create_cloud_sql_engine(
             instance_connection_name=app_config.CLOUD_SQL_INSTANCE,
             user=app_config.DATABASE_USER,
             password=app_config.DATABASE_PASSWORD,
-            database=app_config.DATABASE_NAME
+            database=app_config.DATABASE_NAME,
         )
     else:
         # Use standard connection via DATABASE_URL
@@ -91,9 +93,7 @@ def run_migrations_online() -> None:
         )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

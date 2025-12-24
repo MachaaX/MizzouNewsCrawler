@@ -10,6 +10,7 @@ uvicorn[standard]>=0.23.0
 selenium>=4.10.0
 undetected-chromedriver>=3.5.0  # Advanced anti-detection
 selenium-stealth>=1.0.6  # Browser fingerprint masking
+brotli>=1.1.0  # Support Brotli compression for HTTP responses
 
 # Article extraction
 newspaper4k>=0.9.4.1  # Use newspaper4k (modern fork)
