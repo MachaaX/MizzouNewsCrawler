@@ -82,7 +82,7 @@ def _setup_extraction_test_environment(
         def __init__(self, enable_telemetry: bool = False) -> None:
             self.enable_telemetry = enable_telemetry
 
-        def analyze_domain(self, domain: str) -> None:
+        def analyze_domain(self, domain: str, session=None) -> None:
             cleaner_calls.append(f"analyzed:{domain}")
 
         def process_single_article(

@@ -1,56 +1,17 @@
-"""URL classification utilities for filtering non-article pages during discovery."""
+"""URL classification utilities for filtering non-article pages during discovery.
+
+NOTE: URL pattern filtering has been migrated to the database (verification_patterns table).
+The URLVerificationService loads patterns dynamically from the database with caching.
+This module now serves as a lightweight fallback only.
+"""
 
 import re
 from urllib.parse import urlparse
 
-# Patterns that strongly indicate a non-article page
-NON_ARTICLE_PATTERNS = [
-    # Gallery and multimedia pages
-    r"/video-gallery/",
-    r"/photo-gallery/",
-    r"/photos/",
-    r"/videos/",
-    r"/galleries/",
-    r"/gallery/",
-    r"/slideshow",
-    r"/image[_-][0-9a-f\-]+\.html",  # Image placeholder pages with hex IDs
-    # Category and listing pages
-    r"/category/",
-    r"/tag/",
-    r"/topics?/",
-    r"/section/",
-    r"/archive",
-    r"/search",
-    # Static/service pages
-    r"/about",
-    r"/contact",
-    r"/staff",
-    r"/advertise",
-    r"/subscribe",
-    r"/newsletter",
-    r"/privacy",
-    r"/terms",
-    r"/sitemap",
-    r"/rss",
-    r"/feed",
-    # Advertising and promotional pages
-    r"/posterboard-ads/",
-    r"/classifieds/",
-    r"/marketplace/",
-    r"/deals/",
-    r"/coupons/",
-    r"/promotions/",
-    r"/sponsored/",
-    r"/shopping",
-    # Technical pages
-    r"\.pdf$",
-    r"\.xml$",
-    r"\.json$",
-    r"/api/",
-    r"/wp-admin",
-    r"/wp-content",
-    r"/wp-includes",
-]
+# DEPRECATED: Patterns have been migrated to verification_patterns table.
+# This fallback list is kept for compatibility but should not be extended.
+# To add new patterns, insert into verification_patterns table instead.
+NON_ARTICLE_PATTERNS = []
 
 # Compile patterns for efficiency
 COMPILED_NON_ARTICLE_PATTERNS = [

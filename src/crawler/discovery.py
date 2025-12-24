@@ -2857,8 +2857,20 @@ class NewsDiscovery:
             # Limit processing and don't download full content
             articles_to_process = articles_attr[: min(self.max_articles_per_source, 25)]
 
+            # Get source domain for filtering
+            source_netloc = urlparse(source_url).netloc.lower() if source_url else None
+
             for article in articles_to_process:
                 try:
+                    # Filter out URLs from external domains
+                    article_netloc = urlparse(article.url).netloc.lower()
+                    if source_netloc and article_netloc != source_netloc:
+                        logger.debug(
+                            f"Skipping external domain URL: {article.url} "
+                            f"(expected {source_netloc}, got {article_netloc})"
+                        )
+                        continue
+
                     normalized_article_url = self._normalize_candidate_url(article.url)
 
                     # Skip if URL already exists
@@ -3091,6 +3103,7 @@ class NewsDiscovery:
             [
                 urljoin(source_url, "/rss"),
                 urljoin(source_url, "/feed"),
+                urljoin(source_url, "/feed/"),  # WordPress standard (trailing slash)
                 urljoin(source_url, "/rss.xml"),
                 urljoin(source_url, "/feed.xml"),
                 urljoin(source_url, "/index.xml"),

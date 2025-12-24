@@ -157,14 +157,28 @@ class BalancedBoundaryContentCleaner:
         domain: str,
         sample_size: int = None,
         min_occurrences: int = 3,
+        session=None,
     ) -> dict:  # pragma: no cover
-        """Analyze domain with balanced boundary requirements."""
+        """Analyze domain with balanced boundary requirements.
+
+        Args:
+            session: Optional SQLAlchemy session to reuse. If None, creates a new one.
+                    Reusing an existing session prevents transaction conflicts.
+        """
         self.logger.info(f"Analyzing domain: {domain}")
 
-        articles = self._get_articles_for_domain(domain, sample_size)
+        # Get or create session
+        db = self._connect_to_db()
+        use_existing_session = session is not None
+        if not use_existing_session:
+            session = db.session
+
+        articles = self._get_articles_for_domain(domain, sample_size, session=session)
 
         # Check if we have persistent patterns for this domain first
-        persistent_segments = self._get_persistent_patterns_for_domain(domain)
+        persistent_segments = self._get_persistent_patterns_for_domain(
+            domain, session=session
+        )
 
         # If we have persistent patterns, use them regardless of article count
         if persistent_segments:
@@ -264,66 +278,80 @@ class BalancedBoundaryContentCleaner:
     def _get_persistent_patterns_for_domain(
         self,
         domain: str,
+        session=None,
     ) -> list[dict]:  # pragma: no cover
-        """Get stored persistent patterns for a domain."""
-        db = self._connect_to_db()
-        with db.get_session() as session:
-            query = """
-            SELECT pattern_text, pattern_type, boundary_score
-            FROM persistent_boilerplate_patterns
-            WHERE domain = :domain AND is_active = TRUE
-            """
-            result = safe_session_execute(session, sql_text(query), {"domain": domain})
+        """Get stored persistent patterns for a domain.
 
-            patterns = []
-            for row in result.fetchall():
-                patterns.append(
-                    {
-                        "text": row[0],
-                        "pattern_type": row[1],
-                        "boundary_score": row[2],
-                        "occurrences": 1,  # Persistent patterns are pre-validated
-                        "length": len(row[0]),
-                        "article_ids": [],  # Will be populated during analysis
-                        "positions": {},  # Will be populated during analysis
-                        "position_consistency": 1.0,  # Perfect for stored patterns
-                        "removal_reason": f"Persistent {row[1]} pattern",
-                    }
-                )
-            return patterns
+        Args:
+            session: SQLAlchemy session to use. If None, uses db.session.
+        """
+        if session is None:
+            db = self._connect_to_db()
+            session = db.session
+
+        query = """
+        SELECT pattern_text, pattern_type, boundary_score
+        FROM persistent_boilerplate_patterns
+        WHERE domain = :domain AND is_active = TRUE
+        """
+        result = safe_session_execute(session, sql_text(query), {"domain": domain})
+
+        patterns = []
+        for row in result.fetchall():
+            patterns.append(
+                {
+                    "text": row[0],
+                    "pattern_type": row[1],
+                    "boundary_score": row[2],
+                    "occurrences": 1,  # Persistent patterns are pre-validated
+                    "length": len(row[0]),
+                    "article_ids": [],  # Will be populated during analysis
+                    "positions": {},  # Will be populated during analysis
+                    "position_consistency": 1.0,  # Perfect for stored patterns
+                    "removal_reason": f"Persistent {row[1]} pattern",
+                }
+            )
+        return patterns
 
     def _get_articles_for_domain(
         self,
         domain: str,
         sample_size: int = None,
+        session=None,
     ) -> list[dict]:  # pragma: no cover
-        """Get articles for a specific domain."""
-        db = self._connect_to_db()
-        with db.get_session() as session:
-            query = """
-            SELECT id, url, content, text_hash
-            FROM articles
-            WHERE url LIKE :domain
-            AND content IS NOT NULL
-            AND content != ''
-            ORDER BY id DESC
-            """
-            params: dict[str, Any] = {"domain": f"%{domain}%"}
+        """Get articles for a specific domain.
 
-            if sample_size:
-                query += " LIMIT :limit"
-                params["limit"] = sample_size
+        Args:
+            session: SQLAlchemy session to use. If None, uses db.session.
+        """
+        if session is None:
+            db = self._connect_to_db()
+            session = db.session
 
-            result = safe_session_execute(session, sql_text(query), params)
-            articles = [
-                {
-                    "id": row[0],
-                    "url": row[1],
-                    "content": row[2],
-                    "text_hash": row[3],
-                }
-                for row in result.fetchall()
-            ]
+        query = """
+        SELECT id, url, content, text_hash
+        FROM articles
+        WHERE url LIKE :domain
+        AND content IS NOT NULL
+        AND content != ''
+        ORDER BY id DESC
+        """
+        params: dict[str, Any] = {"domain": f"%{domain}%"}
+
+        if sample_size:
+            query += " LIMIT :limit"
+            params["limit"] = sample_size
+
+        result = safe_session_execute(session, sql_text(query), params)
+        articles = [
+            {
+                "id": row[0],
+                "url": row[1],
+                "content": row[2],
+                "text_hash": row[3],
+            }
+            for row in result.fetchall()
+        ]
         return articles
 
     def _find_rough_candidates(
