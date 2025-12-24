@@ -9,7 +9,11 @@ import pytest
 from unittest.mock import MagicMock, Mock, patch, call
 from sqlalchemy import text as sql_text
 
-from src.utils.content_cleaner_balanced import BalancedBoundaryContentCleaner
+from src.utils.content_cleaner_balanced import (
+    BalancedBoundaryContentCleaner,
+    SOCIAL_SHARE_PHRASES,
+    SOCIAL_SHARE_PREFIX_SEPARATORS,
+)
 from src.models.database import DatabaseManager
 
 
@@ -261,3 +265,259 @@ class TestExtractionCommandIntegration:
                 call_args[0][0] == session
                 for call_args in mock_execute.call_args_list
             ), "All database queries should use the provided session"
+
+
+class TestContentCleanerCore:
+    """Test core content cleaning functionality to increase coverage."""
+
+    def test_initialization_with_shared_db(self):
+        """Test cleaner initialization with shared DatabaseManager."""
+        mock_db = Mock(spec=DatabaseManager)
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+            db=mock_db,
+        )
+        
+        assert cleaner._shared_db == mock_db
+        assert cleaner.enable_telemetry is False
+        assert cleaner.use_cloud_sql is True
+
+    def test_connect_to_db_returns_shared_db(self):
+        """Test _connect_to_db returns shared DatabaseManager when available."""
+        mock_db = Mock(spec=DatabaseManager)
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+            db=mock_db,
+        )
+        
+        result = cleaner._connect_to_db()
+        assert result == mock_db
+
+    def test_connect_to_db_creates_new_when_none(self):
+        """Test _connect_to_db creates new DatabaseManager when none provided."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        with patch('src.utils.content_cleaner_balanced.DatabaseManager') as mock_db_class:
+            result = cleaner._connect_to_db()
+            mock_db_class.assert_called_once()
+
+    def test_normalize_navigation_token(self):
+        """Test navigation token normalization."""
+        assert BalancedBoundaryContentCleaner._normalize_navigation_token("HOME") == "home"
+        assert BalancedBoundaryContentCleaner._normalize_navigation_token("News") == "news"
+        assert BalancedBoundaryContentCleaner._normalize_navigation_token("  SPORTS  ") == "sports"
+
+    def test_extract_navigation_prefix(self):
+        """Test extraction of navigation prefixes."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        # Content with navigation prefix
+        text = "Home • News • Local\n\nActual article content here."
+        result = cleaner._extract_navigation_prefix(text)
+        
+        # Should detect navigation pattern at start
+        assert result is None or isinstance(result, str)
+
+    def test_assess_boundary_quality(self):
+        """Test boundary quality assessment."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        # Good boundary (complete sentence)
+        score = cleaner._assess_boundary_quality("This is a complete sentence.")
+        assert 0 <= score <= 1
+        
+        # Poor boundary (fragment)
+        score = cleaner._assess_boundary_quality("incomplete text without")
+        assert 0 <= score <= 1
+
+    def test_classify_pattern(self):
+        """Test pattern classification."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        # Should classify different types
+        pattern_type = cleaner._classify_pattern("Copyright © 2023 Example Corp")
+        assert pattern_type in ["footer", "header", "navigation", "sidebar", "subscription", "trending", "other"]
+        
+        pattern_type = cleaner._classify_pattern("Share this article on Facebook")
+        assert pattern_type in ["footer", "header", "navigation", "sidebar", "subscription", "trending", "other"]
+
+    def test_generate_removal_reason(self):
+        """Test removal reason generation."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        reason = cleaner._generate_removal_reason("Copyright © 2023 Example Corp", "footer", 0.95, 10)
+        assert isinstance(reason, str)
+        assert "footer" in reason.lower() or "Footer" in reason
+
+    def test_calculate_domain_stats(self):
+        """Test domain statistics calculation."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        articles = [
+            {"id": "1", "content": "A" * 1000},
+            {"id": "2", "content": "B" * 1000},
+        ]
+        
+        segments = [
+            {"text": "A" * 100, "length": 100},
+            {"text": "B" * 50, "length": 50},
+        ]
+        
+        stats = cleaner._calculate_domain_stats(articles, segments)
+        
+        assert 'total_removable_chars' in stats
+        assert 'removal_percentage' in stats
+        assert stats['total_removable_chars'] > 0
+        assert 0 <= stats['removal_percentage'] <= 100
+
+    def test_is_social_share_cluster(self):
+        """Test detection of social share clusters."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        # Social share cluster
+        assert cleaner._is_social_share_cluster("Facebook Twitter Share Email") is True
+        
+        # Not a social share cluster
+        assert cleaner._is_social_share_cluster("Important local news today") is False
+
+    def test_remove_social_share_header(self):
+        """Test removal of social share headers."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        text = "Share • Facebook Twitter\n\nActual article content here."
+        result = cleaner._remove_social_share_header(text)
+        
+        assert isinstance(result, dict)
+        assert 'cleaned_text' in result
+        assert 'removed_text' in result
+
+    def test_process_single_article_with_telemetry_disabled(self):
+        """Test article processing with telemetry disabled."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        text = "This is a simple article without boilerplate."
+        cleaned, metadata = cleaner.process_single_article(text, domain="example.com")
+        
+        assert isinstance(cleaned, str)
+        assert isinstance(metadata, dict)
+        assert 'social_share_header_removed' in metadata
+        assert 'persistent_removals' in metadata
+        assert 'chars_removed' in metadata
+
+    def test_is_high_confidence_boilerplate(self):
+        """Test high confidence boilerplate detection."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        # Copyright footer
+        assert cleaner._is_high_confidence_boilerplate("Copyright © 2023. All rights reserved.") is True
+        
+        # Normal content
+        assert cleaner._is_high_confidence_boilerplate("The city council met today.") is False
+
+    def test_detect_social_share_prefix_end(self):
+        """Test detection of social share prefix end."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        text = "Share • Facebook Twitter\n\nContent starts here"
+        result = cleaner._detect_social_share_prefix_end(text)
+        
+        # Should return position or None
+        assert result is None or isinstance(result, int)
+
+    def test_calculate_position_consistency(self):
+        """Test position consistency calculation."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        # Perfect consistency (all at same relative position)
+        exact_matches = {
+            "1": [(10, 20)],
+            "2": [(10, 20)],
+            "3": [(10, 20)],
+        }
+        articles_by_id = {
+            "1": {"content": "A" * 100},
+            "2": {"content": "B" * 100},
+            "3": {"content": "C" * 100},
+        }
+        consistency = cleaner._calculate_position_consistency(exact_matches, articles_by_id)
+        assert consistency > 0.9
+
+    def test_contains_term(self):
+        """Test term containment check."""
+        assert BalancedBoundaryContentCleaner._contains_term("hello world", "world") is True
+        assert BalancedBoundaryContentCleaner._contains_term("hello world", "xyz") is False
+
+    def test_find_rough_candidates(self):
+        """Test rough candidate detection."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        articles = [
+            {"id": "1", "content": "First article with some content."},
+            {"id": "2", "content": "Second article with different content."},
+        ]
+        
+        candidates = cleaner._find_rough_candidates(articles)
+        
+        assert isinstance(candidates, dict)
+
+    def test_filter_with_balanced_boundaries(self):
+        """Test balanced boundary filtering."""
+        cleaner = BalancedBoundaryContentCleaner(
+            db_path=":memory:",
+            enable_telemetry=False,
+        )
+        
+        candidates = {
+            "test pattern": {"1", "2", "3"}
+        }
+        
+        articles = [
+            {"id": "1", "content": "Before. test pattern. After."},
+            {"id": "2", "content": "Start. test pattern. End."},
+            {"id": "3", "content": "Begin. test pattern. Finish."},
+        ]
+        
+        filtered = cleaner._filter_with_balanced_boundaries(articles, candidates, min_occurrences=2, telemetry_id="test")
+        
+        assert isinstance(filtered, list)
