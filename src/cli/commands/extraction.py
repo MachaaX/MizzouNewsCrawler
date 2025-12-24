@@ -2045,7 +2045,8 @@ def _run_post_extraction_cleaning(domains_to_articles, db=None):
                 continue
 
             try:
-                cleaner.analyze_domain(domain)
+                # Pass session to prevent opening new connections and transaction conflicts
+                cleaner.analyze_domain(domain, session=session)
             except Exception as e:
                 # Domain analysis is optional optimization - skip if tables don't exist
                 error_str = str(e)
