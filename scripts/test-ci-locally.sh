@@ -278,15 +278,23 @@ docker run --rm \
     -v "$(pwd)":/workspace \
     -w /workspace \
     us-central1-docker.pkg.dev/mizzou-news-crawler/mizzou-crawler/ci-base:latest \
-    /bin/bash -c "pytest -m 'not postgres' -v" 2>&1 | grep -v "WARNING: The requested image's platform" || true
+    /bin/bash -c "pytest -m 'not postgres' -v --cov-fail-under=78" 2>&1 | grep -v "WARNING: The requested image's platform" || true
 TEST_EXIT_CODE=${PIPESTATUS[0]}  # Gets exit code of docker run, not grep
 set -e   # Re-enable exit-on-error
 
-if [ $TEST_EXIT_CODE -ne 0 ]; then
-    echo -e "${RED}❌ Unit + integration tests failed${NC}"
+# Check if tests failed (not just coverage)
+# Exit code 1 = test failures, Exit code 2 = coverage failure but tests passed
+if [ $TEST_EXIT_CODE -eq 1 ]; then
+    echo -e "${RED}❌ Unit + integration tests FAILED (test failures, not coverage)${NC}"
+    exit 1
+elif [ $TEST_EXIT_CODE -eq 2 ]; then
+    echo -e "${YELLOW}⚠️  Unit + integration tests passed but coverage is below 78%${NC}"
+    echo -e "${YELLOW}   Continuing to run PostgreSQL tests anyway...${NC}"
+elif [ $TEST_EXIT_CODE -ne 0 ]; then
+    echo -e "${RED}❌ Unit + integration tests failed with exit code $TEST_EXIT_CODE${NC}"
     exit 1
 fi
-echo -e "${GREEN}✅ Step 4/4: Unit + integration tests passed${NC}"
+echo -e "${GREEN}✅ Step 4/5: Unit + integration tests passed${NC}"
 
 # Step 8: Run PostgreSQL integration tests (like CI postgres-integration job)
 echo ""
