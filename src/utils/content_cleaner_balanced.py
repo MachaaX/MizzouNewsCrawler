@@ -157,10 +157,10 @@ class BalancedBoundaryContentCleaner:
         domain: str,
         sample_size: int = None,
         min_occurrences: int = 3,
-        session = None,
+        session=None,
     ) -> dict:  # pragma: no cover
         """Analyze domain with balanced boundary requirements.
-        
+
         Args:
             session: Optional SQLAlchemy session to reuse. If None, creates a new one.
                     Reusing an existing session prevents transaction conflicts.
@@ -176,7 +176,9 @@ class BalancedBoundaryContentCleaner:
         articles = self._get_articles_for_domain(domain, sample_size, session=session)
 
         # Check if we have persistent patterns for this domain first
-        persistent_segments = self._get_persistent_patterns_for_domain(domain, session=session)
+        persistent_segments = self._get_persistent_patterns_for_domain(
+            domain, session=session
+        )
 
         # If we have persistent patterns, use them regardless of article count
         if persistent_segments:
@@ -276,17 +278,17 @@ class BalancedBoundaryContentCleaner:
     def _get_persistent_patterns_for_domain(
         self,
         domain: str,
-        session = None,
+        session=None,
     ) -> list[dict]:  # pragma: no cover
         """Get stored persistent patterns for a domain.
-        
+
         Args:
             session: SQLAlchemy session to use. If None, uses db.session.
         """
         if session is None:
             db = self._connect_to_db()
             session = db.session
-            
+
         query = """
         SELECT pattern_text, pattern_type, boundary_score
         FROM persistent_boilerplate_patterns
@@ -315,17 +317,17 @@ class BalancedBoundaryContentCleaner:
         self,
         domain: str,
         sample_size: int = None,
-        session = None,
+        session=None,
     ) -> list[dict]:  # pragma: no cover
         """Get articles for a specific domain.
-        
+
         Args:
             session: SQLAlchemy session to use. If None, uses db.session.
         """
         if session is None:
             db = self._connect_to_db()
             session = db.session
-            
+
         query = """
         SELECT id, url, content, text_hash
         FROM articles

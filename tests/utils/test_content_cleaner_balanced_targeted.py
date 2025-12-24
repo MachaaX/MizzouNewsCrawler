@@ -115,7 +115,7 @@ class TestDomainAnalysis:
             (1, "https://example.com/art1", "Article 1 content", "hash1"),
             (2, "https://example.com/art2", "Article 2 content", "hash2"),
         ]
-        
+
         # Create result that properly mocks SQLAlchemy's result proxy
         mock_result = Mock()
         mock_result.fetchall.return_value = mock_data

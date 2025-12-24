@@ -1411,7 +1411,7 @@ class ContentExtractor:
 
     def get_persistent_driver(self):
         """Get or create a persistent Selenium driver for reuse.
-        
+
         Automatically recreates the driver after reaching the reuse limit
         to prevent memory leaks from accumulated Chrome renderer processes.
         """

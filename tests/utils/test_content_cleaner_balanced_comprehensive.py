@@ -425,7 +425,7 @@ def test_get_articles_for_domain_with_mocked_db():
             "hash2",
         ),
     ]
-    
+
     # Create result that properly mocks SQLAlchemy's result proxy
     mock_result = Mock()
     mock_result.fetchall.return_value = mock_data

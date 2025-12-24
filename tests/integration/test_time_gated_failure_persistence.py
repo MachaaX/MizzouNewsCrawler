@@ -471,7 +471,7 @@ class TestTimeGatedFailurePersistence:
 
         SessionLocal = sessionmaker(bind=cloud_sql_engine)
         cloud_sql_session = SessionLocal()
-        
+
         timestamp = datetime.utcnow().timestamp()
 
         # Create daily, weekly, and monthly sources
