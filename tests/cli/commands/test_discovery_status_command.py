@@ -43,9 +43,9 @@ class TestAddDiscoveryStatusParser:
         """Parser is created with discovery-status name."""
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers()
-        
+
         result = add_discovery_status_parser(subparsers)
-        
+
         assert result is not None
         args = parser.parse_args(["discovery-status"])
         assert hasattr(args, "dataset")
@@ -57,7 +57,7 @@ class TestAddDiscoveryStatusParser:
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers()
         add_discovery_status_parser(subparsers)
-        
+
         args = parser.parse_args(["discovery-status"])
         assert args.dataset is None
 
@@ -66,7 +66,7 @@ class TestAddDiscoveryStatusParser:
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers()
         add_discovery_status_parser(subparsers)
-        
+
         args = parser.parse_args(["discovery-status", "--dataset", "mizzou"])
         assert args.dataset == "mizzou"
 
@@ -75,7 +75,7 @@ class TestAddDiscoveryStatusParser:
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers()
         add_discovery_status_parser(subparsers)
-        
+
         args = parser.parse_args(["discovery-status"])
         assert args.verbose is False
 
@@ -84,7 +84,7 @@ class TestAddDiscoveryStatusParser:
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers()
         add_discovery_status_parser(subparsers)
-        
+
         args = parser.parse_args(["discovery-status", "-v"])
         assert args.verbose is True
 
@@ -93,6 +93,6 @@ class TestAddDiscoveryStatusParser:
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers()
         add_discovery_status_parser(subparsers)
-        
+
         args = parser.parse_args(["discovery-status", "--verbose"])
         assert args.verbose is True
