@@ -60,7 +60,7 @@ class TestSessionReuse:
         with patch.object(cleaner, '_get_articles_for_domain', return_value=[]) as mock_get_articles:
             with patch.object(cleaner, '_get_persistent_patterns_for_domain', return_value=[]) as mock_get_patterns:
                 # Call without session parameter
-                result = cleaner.analyze_domain("example.com")
+                cleaner.analyze_domain("example.com")
                 
                 # Verify it used the db.session
                 mock_get_articles.assert_called_once()
@@ -118,7 +118,7 @@ class TestSessionReuse:
         mock_result.fetchall.return_value = []
         
         with patch('src.utils.content_cleaner_balanced.safe_session_execute', return_value=mock_result) as mock_execute:
-            articles = cleaner._get_articles_for_domain("example.com")
+            cleaner._get_articles_for_domain("example.com")
             
             # Verify it used db.session
             mock_execute.assert_called_once()
@@ -172,7 +172,7 @@ class TestSessionReuse:
         mock_result.fetchall.return_value = []
         
         with patch('src.utils.content_cleaner_balanced.safe_session_execute', return_value=mock_result) as mock_execute:
-            patterns = cleaner._get_persistent_patterns_for_domain("example.com")
+            cleaner._get_persistent_patterns_for_domain("example.com")
             
             # Verify it used db.session
             mock_execute.assert_called_once()
@@ -303,7 +303,7 @@ class TestContentCleanerCore:
         )
         
         with patch('src.utils.content_cleaner_balanced.DatabaseManager') as mock_db_class:
-            result = cleaner._connect_to_db()
+            cleaner._connect_to_db()
             mock_db_class.assert_called_once()
 
     def test_normalize_navigation_token(self):
