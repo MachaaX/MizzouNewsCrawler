@@ -73,9 +73,8 @@ def check_is_article(url, discovery_method="unknown"):
         if re.search(pattern, url_lower):
             return True
 
-    # commented out below code, cuz could cause false positives
-    # if re.search(r"/\d{3,}", url_lower):
-    #     return True
+    if re.search(r"/\d{3,}", url_lower):
+        return True
 
     # commented out below code, cuz newspaper4k discovered urls are no different than others
     # if discovery_method == "newspaper4k":
