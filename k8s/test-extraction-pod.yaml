@@ -12,7 +12,7 @@ spec:
     command: ["/bin/bash", "-c", "sleep 3600"]
     envFrom:
     - secretRef:
-        name: origin-proxy-credentials
+        name: squid-proxy-credentials
     env:
     # Note: Using psycopg2 driver here (instead of pg8000) because it's more
     # commonly used and provides better debugging output. The ::jsonb fix
@@ -43,7 +43,7 @@ spec:
     - name: SELENIUM_PROXY
       valueFrom:
         secretKeyRef:
-          name: origin-proxy-credentials
+          name: squid-proxy-credentials
           key: selenium-proxy-url
     resources:
       requests:

@@ -262,27 +262,51 @@ def test_dependency_override_in_tests():
 
 @pytest.mark.postgres
 @pytest.mark.integration
-def test_origin_proxy_installed_when_env_var_set():
-    """Test origin proxy installed when USE_ORIGIN_PROXY=true."""
+def test_http_session_configured_with_squid_proxy():
+    """HTTP session should route through Squid proxy settings."""
     from backend.app.lifecycle import lifespan
+    from src.crawler import proxy_config
 
-    with patch.dict("os.environ", {"USE_ORIGIN_PROXY": "true"}):
-        with patch("backend.app.lifecycle.enable_origin_proxy") as mock_enable:
+    env = {
+        "PROXY_PROVIDER": "squid",
+        "SQUID_PROXY_URL": "http://squid-proxy.internal:8080",
+        "SQUID_PROXY_USERNAME": "proxy-user",
+        "SQUID_PROXY_PASSWORD": "proxy-pass",
+        "USE_ORIGIN_PROXY": "true",
+    }
+
+    with patch.dict("os.environ", env, clear=False):
+        original_manager = proxy_config._proxy_manager
+        proxy_config._proxy_manager = None
+        try:
             app = FastAPI(lifespan=lifespan)
             with TestClient(app):
-                pass
-            assert mock_enable.call_count > 0
+                proxies = app.state.http_session.proxies
+                assert (
+                    proxies["http"]
+                    == "http://proxy-user:proxy-pass@squid-proxy.internal:8080"
+                )
+                assert (
+                    proxies["https"]
+                    == "http://proxy-user:proxy-pass@squid-proxy.internal:8080"
+                )
+        finally:
+            proxy_config._proxy_manager = original_manager
 
 
 @pytest.mark.postgres
 @pytest.mark.integration
-def test_origin_proxy_not_installed_when_env_var_unset():
-    """Test origin proxy not installed when USE_ORIGIN_PROXY unset."""
+def test_http_session_uses_direct_connection_when_provider_disabled():
+    """HTTP session should fall back to direct connections when requested."""
     from backend.app.lifecycle import lifespan
+    from src.crawler import proxy_config
 
-    with patch.dict("os.environ", {"USE_ORIGIN_PROXY": ""}, clear=True):
-        with patch("backend.app.lifecycle.enable_origin_proxy") as mock_enable:
+    with patch.dict("os.environ", {"PROXY_PROVIDER": "direct"}, clear=False):
+        original_manager = proxy_config._proxy_manager
+        proxy_config._proxy_manager = None
+        try:
             app = FastAPI(lifespan=lifespan)
             with TestClient(app):
-                pass
-            assert mock_enable.call_count == 0
+                assert app.state.http_session.proxies == {}
+        finally:
+            proxy_config._proxy_manager = original_manager

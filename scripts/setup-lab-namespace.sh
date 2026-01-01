@@ -68,14 +68,14 @@ else
     echo "✓ Secret cloudsql-db-credentials already exists"
 fi
 
-# Origin proxy credentials
-if ! kubectl get secret origin-proxy-credentials -n ${NAMESPACE} &>/dev/null; then
-    kubectl get secret origin-proxy-credentials -n ${PRODUCTION_NAMESPACE} -o yaml | \
+# Squid proxy credentials
+if ! kubectl get secret squid-proxy-credentials -n ${NAMESPACE} &>/dev/null; then
+    kubectl get secret squid-proxy-credentials -n ${PRODUCTION_NAMESPACE} -o yaml | \
         sed "s/namespace: ${PRODUCTION_NAMESPACE}/namespace: ${NAMESPACE}/" | \
         kubectl apply -f -
-    echo "✓ Copied origin-proxy-credentials"
+    echo "✓ Copied squid-proxy-credentials"
 else
-    echo "✓ Secret origin-proxy-credentials already exists"
+    echo "✓ Secret squid-proxy-credentials already exists"
 fi
 echo ""
 

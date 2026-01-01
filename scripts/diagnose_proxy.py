@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import requests
 
-from src.crawler.origin_proxy import enable_origin_proxy
+from src.crawler.proxy_config import get_proxy_manager
 
 # Configure logging
 logging.basicConfig(
@@ -36,12 +36,11 @@ def check_environment():
     logger.info("=" * 80)
     
     vars_to_check = [
-        'USE_ORIGIN_PROXY',
-        'ORIGIN_PROXY_URL',
-        'PROXY_HOST',
-        'PROXY_URL',
-        'PROXY_USERNAME',
-        'PROXY_PASSWORD',
+        'PROXY_PROVIDER',
+        'SQUID_PROXY_URL',
+        'SQUID_PROXY_USERNAME',
+        'SQUID_PROXY_PASSWORD',
+        'PROXY_POOL',
         'NO_PROXY',
         'no_proxy',
     ]
@@ -72,12 +71,12 @@ def test_proxy_connectivity():
     logger.info("PROXY CONNECTIVITY TEST")
     logger.info("=" * 80)
     
-    proxy_url = (
-        os.getenv("ORIGIN_PROXY_URL") 
-        or os.getenv("PROXY_HOST") 
-        or os.getenv("PROXY_URL")
-        or "http://proxy.kiesow.net:23432"
-    )
+    proxy_url = os.getenv("SQUID_PROXY_URL")
+
+    if not proxy_url:
+        logger.warning("  ⚠️  SQUID_PROXY_URL is not set; cannot test connectivity")
+        logger.info("")
+        return
     
     logger.info(f"Testing connectivity to: {proxy_url}")
     
@@ -112,12 +111,11 @@ def test_proxied_request():
         "http://example.com",
     ]
     
-    use_proxy = os.getenv("USE_ORIGIN_PROXY", "").lower() in ("1", "true", "yes")
-    logger.info(f"USE_ORIGIN_PROXY: {use_proxy}")
-    
-    if not use_proxy:
-        logger.warning("  ⚠️  USE_ORIGIN_PROXY is not enabled!")
-        logger.info("  Set USE_ORIGIN_PROXY=1 to enable proxy")
+    manager = get_proxy_manager()
+    proxies = manager.get_requests_proxies()
+
+    if not proxies:
+        logger.warning("  ⚠️  No proxy configuration detected (SQUID_PROXY_URL missing?)")
         return
     
     for test_url in test_urls:
@@ -125,7 +123,7 @@ def test_proxied_request():
         
         # Create session with proxy enabled
         session = requests.Session()
-        enable_origin_proxy(session)
+        session.proxies.update(proxies)
         
         try:
             response = session.get(test_url, timeout=15)
@@ -196,19 +194,20 @@ def test_real_site():
         "https://www.example.com/",  # Simple fallback
     ]
     
-    use_proxy = os.getenv("USE_ORIGIN_PROXY", "").lower() in ("1", "true", "yes")
-    
+    manager = get_proxy_manager()
+    proxies = manager.get_requests_proxies()
+
     for site_url in test_sites:
         logger.info(f"\nTesting: {site_url}")
-        logger.info(f"  Proxy enabled: {use_proxy}")
+        logger.info(f"  Proxy configured: {'yes' if proxies else 'no'}")
         
         session = requests.Session()
         session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         
-        if use_proxy:
-            enable_origin_proxy(session)
+        if proxies:
+            session.proxies.update(proxies)
         
         try:
             response = session.get(site_url, timeout=20)
@@ -249,19 +248,19 @@ def main():
     logger.info("\n")
     logger.info("RECOMMENDATIONS:")
     
-    use_proxy = os.getenv("USE_ORIGIN_PROXY", "").lower() in ("1", "true", "yes")
-    has_url = bool(os.getenv("ORIGIN_PROXY_URL") or os.getenv("PROXY_HOST"))
-    has_auth = bool(os.getenv("PROXY_USERNAME"))
-    
-    if not use_proxy:
-        logger.info("  1. Enable proxy: export USE_ORIGIN_PROXY=1")
+    has_url = bool(os.getenv("SQUID_PROXY_URL"))
+    username = os.getenv("SQUID_PROXY_USERNAME")
+    password = os.getenv("SQUID_PROXY_PASSWORD")
+
     if not has_url:
-        logger.info("  2. Set proxy URL: export ORIGIN_PROXY_URL=http://proxy.kiesow.net:23432")
-    if not has_auth:
-        logger.warning("  3. ⚠️  Set proxy credentials: export PROXY_USERNAME=... PROXY_PASSWORD=...")
-    
-    if use_proxy and has_url and has_auth:
-        logger.info("  ✓ Proxy configuration looks good!")
+        logger.info("  1. Set proxy URL: export SQUID_PROXY_URL=http://your-squid-host:3128")
+    if username and not password:
+        logger.warning("  2. ⚠️  Provide SQUID_PROXY_PASSWORD for authenticated Squid proxies")
+    if password and not username:
+        logger.warning("  2. ⚠️  Provide SQUID_PROXY_USERNAME for authenticated Squid proxies")
+
+    if has_url and ((username and password) or (not username and not password)):
+        logger.info("  ✓ Squid proxy configuration looks good!")
     
     logger.info("\n")
 

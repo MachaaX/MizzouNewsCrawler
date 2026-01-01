@@ -103,7 +103,7 @@ class TestArgoWorkflowImageConfiguration:
         )
 
     def test_all_crawler_steps_have_secret_manager_env_vars(self, base_workflow):
-        """All crawler workflow steps must have GCP Secret Manager env vars."""
+        """All crawler steps must load Squid proxy secrets and GCP project info."""
         templates = base_workflow["spec"]["templates"]
         crawler_steps = [
             "discovery-step",
@@ -116,17 +116,36 @@ class TestArgoWorkflowImageConfiguration:
             env_vars = template["container"].get("env", [])
             env_var_names = [e["name"] for e in env_vars]
 
-            assert "DECODO_SECRET_NAME" in env_var_names, (
-                f"{step_name} missing DECODO_SECRET_NAME env var "
-                "required for GCP Secret Manager proxy credentials"
+            provider_var = next(
+                (e for e in env_vars if e["name"] == "PROXY_PROVIDER"), None
             )
+            assert provider_var is not None, f"{step_name} missing PROXY_PROVIDER"
+            assert (
+                provider_var.get("value") == "squid"
+            ), f"{step_name} must enforce Squid proxy provider"
+
+            for env_name, secret_key in (
+                ("SQUID_PROXY_URL", "squid-proxy-url"),
+                ("SQUID_PROXY_USERNAME", "username"),
+                ("SQUID_PROXY_PASSWORD", "password"),
+            ):
+                env_var = next((e for e in env_vars if e["name"] == env_name), None)
+                assert env_var is not None, f"{step_name} missing {env_name}"
+                secret_ref = env_var.get("valueFrom", {}).get("secretKeyRef", {})
+                assert (
+                    secret_ref.get("name") == "squid-proxy-credentials"
+                ), f"{step_name} {env_name} should reference squid-proxy-credentials"
+                assert (
+                    secret_ref.get("key") == secret_key
+                ), f"{step_name} {env_name} should use '{secret_key}' key"
+
             assert "GOOGLE_CLOUD_PROJECT" in env_var_names, (
                 f"{step_name} missing GOOGLE_CLOUD_PROJECT env var "
                 "required for GCP Secret Manager proxy credentials"
             )
 
-    def test_argo_steps_have_unblock_and_proxy_secrets(self, base_workflow):
-        """Ensure Argo workflow steps have both DECODO_SECRET_NAME and UNBLOCK_PROXY_* envs set correctly."""
+    def test_argo_steps_have_squid_proxy_secrets(self, base_workflow):
+        """Ensure Squid proxy secrets are wired for every Argo crawler step."""
         templates = base_workflow["spec"]["templates"]
         crawler_steps = [
             "discovery-step",
@@ -138,46 +157,48 @@ class TestArgoWorkflowImageConfiguration:
             template = next(t for t in templates if t.get("name") == step_name)
             env_vars = template["container"].get("env", [])
 
-            decodo_secret_var = next(
-                (e for e in env_vars if e["name"] == "DECODO_SECRET_NAME"), None
+            squid_url_var = next(
+                (e for e in env_vars if e["name"] == "SQUID_PROXY_URL"), None
             )
+            assert squid_url_var is not None, f"{step_name} missing SQUID_PROXY_URL"
+            url_secret = squid_url_var.get("valueFrom", {}).get("secretKeyRef", {})
             assert (
-                decodo_secret_var is not None
-            ), f"{step_name} missing DECODO_SECRET_NAME"
+                url_secret.get("name") == "squid-proxy-credentials"
+            ), f"{step_name} SQUID_PROXY_URL secret mismatch"
             assert (
-                decodo_secret_var.get("value") == "decodo-proxy-creds"
-            ), f"{step_name} DECODO_SECRET_NAME should be 'decodo-proxy-creds'"
+                url_secret.get("key") == "squid-proxy-url"
+            ), f"{step_name} SQUID_PROXY_URL should use squid-proxy-url key"
 
-            # Only the extraction step requires unblock proxy creds
+            for env_name, secret_key in (
+                ("SQUID_PROXY_USERNAME", "username"),
+                ("SQUID_PROXY_PASSWORD", "password"),
+            ):
+                env_var = next((e for e in env_vars if e["name"] == env_name), None)
+                assert env_var is not None, f"{step_name} missing {env_name}"
+                secret = env_var.get("valueFrom", {}).get("secretKeyRef", {})
+                assert (
+                    secret.get("name") == "squid-proxy-credentials"
+                ), f"{step_name} {env_name} must reference squid-proxy-credentials"
+                assert (
+                    secret.get("key") == secret_key
+                ), f"{step_name} {env_name} should use '{secret_key}' key"
+
             if step_name == "extraction-step":
-                unblock_user_var = next(
-                    (e for e in env_vars if e["name"] == "UNBLOCK_PROXY_USER"), None
-                )
-                unblock_pass_var = next(
-                    (e for e in env_vars if e["name"] == "UNBLOCK_PROXY_PASS"), None
+                selenium_var = next(
+                    (e for e in env_vars if e["name"] == "SELENIUM_PROXY"), None
                 )
                 assert (
-                    unblock_user_var is not None and unblock_pass_var is not None
-                ), f"{step_name} missing UNBLOCK_PROXY_USER or UNBLOCK_PROXY_PASS env var"
+                    selenium_var is not None
+                ), "extraction-step missing SELENIUM_PROXY"
+                selenium_secret = selenium_var.get("valueFrom", {}).get(
+                    "secretKeyRef", {}
+                )
                 assert (
-                    unblock_user_var.get("valueFrom", {})
-                    .get("secretKeyRef", {})
-                    .get("name")
-                    == "decodo-unblock-credentials"
-                ), f"{step_name} UNBLOCK_PROXY_USER must reference 'decodo-unblock-credentials' secret"
+                    selenium_secret.get("name") == "squid-proxy-credentials"
+                ), "SELENIUM_PROXY must reference squid-proxy-credentials"
                 assert (
-                    unblock_pass_var.get("valueFrom", {})
-                    .get("secretKeyRef", {})
-                    .get("name")
-                    == "decodo-unblock-credentials"
-                ), f"{step_name} UNBLOCK_PROXY_PASS must reference 'decodo-unblock-credentials' secret"
-            # Ensure CONNECT-first flow keeps API POST disabled by default
-            pref_post_var = next(
-                (e for e in env_vars if e["name"] == "UNBLOCK_PREFER_API_POST"), None
-            )
-            assert (
-                pref_post_var is not None and pref_post_var.get("value") == "false"
-            ), f"{step_name} UNBLOCK_PREFER_API_POST should be 'false'"
+                    selenium_secret.get("key") == "selenium-proxy-url"
+                ), "SELENIUM_PROXY should use selenium-proxy-url key"
 
 
 class TestKubernetesDeploymentConfiguration:

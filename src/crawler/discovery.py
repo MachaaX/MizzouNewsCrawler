@@ -80,7 +80,6 @@ from src.utils.telemetry import (
 from src.utils.url_utils import normalize_url
 
 from ..models.database import DatabaseManager, safe_execute, safe_session_execute
-from .origin_proxy import enable_origin_proxy
 from .proxy_config import get_proxy_manager
 
 logger = logging.getLogger(__name__)
@@ -362,32 +361,6 @@ class NewsDiscovery:
             "🔀 Proxy manager initialized with provider: %s",
             active_provider.value,
         )
-
-        use_origin_proxy = os.getenv("USE_ORIGIN_PROXY", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-
-        if active_provider.value == "origin" or use_origin_proxy:
-            try:
-                enable_origin_proxy(self.session)
-                proxy_base = (
-                    self.proxy_manager.get_origin_proxy_url()
-                    or os.getenv("ORIGIN_PROXY_URL")
-                    or os.getenv("PROXY_URL")
-                    or "default"
-                )
-                logger.info(
-                    "🔐 Discovery using origin proxy adapter (%s)",
-                    mask_proxy_url(proxy_base),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to install origin proxy adapter for discovery: %s",
-                    exc,
-                )
-            return
 
         proxies = self.proxy_manager.get_requests_proxies()
         if proxies:

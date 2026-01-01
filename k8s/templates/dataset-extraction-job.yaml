@@ -68,19 +68,33 @@ spec:
         - name: CLOUD_SQL_INSTANCE
           value: mizzou-news-crawler:us-central1:mizzou-db-prod
         - name: PROXY_PROVIDER
-          value: decodo
-        - name: USE_ORIGIN_PROXY
-          value: 'true'
+          value: squid
+        - name: SQUID_PROXY_URL
+          valueFrom:
+            secretKeyRef:
+              key: squid-proxy-url
+              name: squid-proxy-credentials
+              optional: true
+        - name: SQUID_PROXY_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: squid-proxy-credentials
+              optional: true
+        - name: SQUID_PROXY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: squid-proxy-credentials
+              optional: true
         - name: SELENIUM_PROXY
           valueFrom:
             secretKeyRef:
               key: selenium-proxy-url
-              name: origin-proxy-credentials
+              name: squid-proxy-credentials
+              optional: true
         - name: NO_PROXY
           value: localhost,127.0.0.1,metadata.google.internal,huggingface.co,*.huggingface.co
-        envFrom:
-        - secretRef:
-            name: origin-proxy-credentials
         image: PROCESSOR_IMAGE
         name: extraction
         resources:

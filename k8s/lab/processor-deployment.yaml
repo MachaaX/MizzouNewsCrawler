@@ -26,12 +26,7 @@ spec:
         command:
           - python
           - orchestration/continuous_processor.py
-        envFrom:
-        - secretRef:
-            name: origin-proxy-credentials
         env:
-        - name: PYTHONPATH
-          value: "/app:/opt/origin-shim"
         - name: DATABASE_ENGINE
           value: "postgresql+psycopg2"
         - name: DATABASE_HOST
@@ -85,17 +80,32 @@ spec:
           value: "4"
         - name: UA_ROTATE_JITTER
           value: "0.25"
-        - name: DECODO_ROTATE_IP
-          value: "true"
         - name: PROXY_PROVIDER
-          value: "decodo"
-        - name: USE_ORIGIN_PROXY
-          value: "false"
+          value: "squid"
+        - name: SQUID_PROXY_URL
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: squid-proxy-url
+              optional: true
+        - name: SQUID_PROXY_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: username
+              optional: true
+        - name: SQUID_PROXY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: password
+              optional: true
         - name: SELENIUM_PROXY
           valueFrom:
             secretKeyRef:
-              name: origin-proxy-credentials
+              name: squid-proxy-credentials
               key: selenium-proxy-url
+              optional: true
         - name: NO_PROXY
           value: "localhost,127.0.0.1,metadata.google.internal,huggingface.co,*.huggingface.co,cdn-lfs.huggingface.co,cdn.huggingface.co"
         - name: no_proxy

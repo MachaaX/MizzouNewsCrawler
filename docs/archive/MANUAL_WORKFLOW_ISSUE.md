@@ -60,7 +60,7 @@ spec:
 **Key features:**
 - ✅ Uses `news-pipeline-template` WorkflowTemplate
 - ✅ Proper Cloud SQL connector with sidecar
-- ✅ Correct secrets: `cloudsql-db-credentials`, `origin-proxy-credentials`
+- ✅ Correct secrets: `cloudsql-db-credentials`, `squid-proxy-credentials`
 - ✅ Proper database environment variables
 - ✅ 3-step pipeline: discovery → verification → extraction
 

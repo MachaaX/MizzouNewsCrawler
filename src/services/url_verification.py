@@ -37,9 +37,7 @@ except ImportError:
     print("Error: storysniffer not installed. Run: pip install storysniffer")
     sys.exit(1)
 
-from src.crawler.origin_proxy import enable_origin_proxy  # noqa: E402
 from src.crawler.proxy_config import get_proxy_manager  # noqa: E402
-from src.crawler.utils import mask_proxy_url  # noqa: E402
 from src.models.database import DatabaseManager, safe_execute  # noqa: E402
 from src.models.verification import VerificationPattern  # noqa: E402
 from src.utils.telemetry import (  # noqa: E402
@@ -188,34 +186,13 @@ class URLVerificationService:
             active_provider.value,
         )
 
-        use_origin_proxy = os.getenv("USE_ORIGIN_PROXY", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-
-        if active_provider.value == "origin" or use_origin_proxy:
-            try:
-                enable_origin_proxy(self.http_session)
-                proxy_base = (
-                    self.proxy_manager.get_origin_proxy_url()
-                    or os.getenv("ORIGIN_PROXY_URL")
-                    or os.getenv("PROXY_URL")
-                    or "default"
-                )
-                self.logger.info(
-                    "🔐 Verification using origin proxy adapter (%s)",
-                    mask_proxy_url(proxy_base),
-                )
-            except Exception as exc:
-                self.logger.warning(
-                    "Failed to install origin proxy adapter for verification: %s",
-                    exc,
-                )
-            return
-
         proxies = self.proxy_manager.get_requests_proxies()
         if proxies:
+            if (
+                not hasattr(self.http_session, "proxies")
+                or self.http_session.proxies is None
+            ):
+                self.http_session.proxies = {}
             self.http_session.proxies.update(proxies)
             self.logger.info(
                 "🔐 Verification using %s provider (%s)",

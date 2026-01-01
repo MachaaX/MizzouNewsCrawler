@@ -163,7 +163,9 @@ class TestCreateJobManifest:
             "USE_CLOUD_SQL_CONNECTOR",
             "CLOUD_SQL_INSTANCE",
             "PROXY_PROVIDER",
-            "USE_ORIGIN_PROXY",
+            "SQUID_PROXY_URL",
+            "SQUID_PROXY_USERNAME",
+            "SQUID_PROXY_PASSWORD",
             "SELENIUM_PROXY",
             "NO_PROXY",
         }

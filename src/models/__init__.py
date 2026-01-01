@@ -628,12 +628,12 @@ class Source(Base):
     # Values: 'perimeterx', 'cloudflare', 'datadome', 'akamai', 'incapsula', etc.
     bot_protection_type = Column(String(64), nullable=True, index=True)
     # Extraction method for this source: 'http' (default), 'selenium', 'unblock'
-    # 'unblock' uses Decodo headless browser API for strong bot protection bypass
+    # 'unblock' routes traffic through the Squid residential proxy tier
     extraction_method = Column(
         String(32), default="http", nullable=False, server_default=text("'http'")
     )
     # Discovery proxy for sources with bot detection on homepage/RSS
-    # Values: NULL (no proxy), 'decodo', 'selenium_proxy' (uses SELENIUM_PROXY env var)
+    # Values: NULL (no proxy), 'squid', 'selenium_proxy' (uses SELENIUM_PROXY env var)
     # When set, discovery methods will route requests through specified proxy
     discovery_proxy = Column(String(32), nullable=True, index=True)
     # Legacy field - kept for backward compatibility, maps to extraction_method
