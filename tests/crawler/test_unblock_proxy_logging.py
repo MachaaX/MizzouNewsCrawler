@@ -13,14 +13,14 @@ def test_unblock_proxy_does_not_log_password(caplog, monkeypatch):
     monkeypatch.setenv("UNBLOCK_PREFER_API_POST", "true")
 
     extractor = ContentExtractor()
-    # Simulate POST-first flow returning a large HTML (success)
+    # Simulate successful Squid proxy response
     large_resp = Mock()
     large_resp.status_code = 200
-    large_resp.text = "<html>" + ("x" * UNBLOCK_MIN_HTML_BYTES) + "</html>"
+    large_resp.text = "<html>" + ("x" * 2000) + "</html>"  # Large enough content
 
     caplog.set_level(logging.INFO)
-    with patch("requests.post", return_value=large_resp):
-        # Run extraction; this should use POST and set proxy metadata
+    with patch("requests.get", return_value=large_resp):
+        # Run extraction; this should use Squid proxy
         extractor._extract_with_unblock_proxy("https://example.com/article", None, None)
 
     # Ensure logs do not contain raw unblock password

@@ -1,4 +1,17 @@
-"""Comprehensive tests for unblock proxy extraction feature.
+"""
+⚠️  DEPRECATION WARNING: This test module is deprecated following migration from Decodo to Squid proxy.
+
+The unblock proxy functionality has been completely rewritten to use Squid proxy instead of Decodo API.
+These tests verified Decodo proxy integration which is no longer used in production.
+
+New Squid-only implementation is tested in tests/test_squid_only_proxy.py
+
+These tests are marked as deprecated and will be removed in a future version.
+For current proxy testing, see tests/test_squid_only_proxy.py
+
+Original module description preserved for reference:
+
+Comprehensive tests for unblock proxy extraction feature.
 
 This module tests the complete logic flow for the extraction_method='unblock' feature:
 
@@ -54,6 +67,14 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from sqlalchemy import text
+
+# Deprecation marker for all tests in this file
+pytestmark = [
+    pytest.mark.skip(
+        reason="DEPRECATED: Unblock proxy tests superseded by Squid-only implementation. See tests/test_squid_only_proxy.py"
+    ),
+    pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning"),
+]
 
 # Ensure project root is on sys.path for direct test execution
 ROOT = Path(__file__).resolve().parents[1]

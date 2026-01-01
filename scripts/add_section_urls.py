@@ -51,6 +51,7 @@ def add_section_urls(
     show: bool = False,
 ) -> int:
     """Add or show section URLs for sources."""
+    from datetime import datetime
     
     if not any([host, name, pattern]):
         logger.error("Must specify --host, --name, or --pattern")
@@ -77,7 +78,7 @@ def add_section_urls(
     with db_manager.get_session() as session:
         # Find matching sources
         query = text(f"""
-            SELECT id, host, canonical_name, metadata
+            SELECT id, host, canonical_name, discovered_sections
             FROM sources
             WHERE {where_sql}
         """)
@@ -92,23 +93,23 @@ def add_section_urls(
         
         updated_count = 0
         for row in results:
-            source_id, source_host, source_name, meta_str = row
+            source_id, source_host, source_name, sections_data = row
             
-            # Parse existing metadata
-            if meta_str:
-                if isinstance(meta_str, str):
-                    metadata = json.loads(meta_str)
+            # Parse existing discovered_sections JSON
+            if sections_data:
+                if isinstance(sections_data, str):
+                    current_data = json.loads(sections_data)
                 else:
-                    metadata = meta_str
+                    current_data = sections_data
             else:
-                metadata = {}
+                current_data = {}
             
             # Show mode
             if show:
-                current_sections = metadata.get("section_urls", [])
+                current_urls = current_data.get("urls", [])
                 logger.info(
                     f"Source: {source_name} ({source_host})\n"
-                    f"  Current section_urls: {current_sections}"
+                    f"  Current section URLs: {current_urls}"
                 )
                 continue
             
@@ -117,36 +118,61 @@ def add_section_urls(
                 logger.error("Must specify --sections when updating")
                 return 1
             
-            # Parse sections input
-            section_list = [s.strip() for s in sections.split(",") if s.strip()]
+            # Parse sections input - ensure absolute URLs
+            section_list = []
+            for s in sections.split(","):
+                s = s.strip()
+                if not s:
+                    continue
+                # Build absolute URL if just a path
+                if s.startswith("/"):
+                    # Convert path to absolute URL
+                    from urllib.parse import urljoin
+                    abs_url = urljoin(f"https://{source_host}", s)
+                    section_list.append(abs_url)
+                elif s.startswith("http"):
+                    # Already absolute
+                    section_list.append(s)
+                else:
+                    # Assume it's a path without leading slash
+                    from urllib.parse import urljoin
+                    abs_url = urljoin(f"https://{source_host}", f"/{s}")
+                    section_list.append(abs_url)
             
             if not section_list:
                 logger.warning(f"No valid sections provided")
                 continue
             
-            # Update metadata
-            old_sections = metadata.get("section_urls", [])
-            metadata["section_urls"] = section_list
+            # Update discovered_sections JSON structure
+            old_urls = current_data.get("urls", [])
+            new_data = {
+                "urls": section_list,
+                "discovered_at": datetime.utcnow().isoformat(),
+                "discovery_method": "manual_configuration",
+                "count": len(section_list),
+            }
             
             # Save back to database
             update_query = text("""
                 UPDATE sources
-                SET metadata = :metadata
+                SET discovered_sections = :sections,
+                    section_last_updated = :updated_at
                 WHERE id = :id
             """)
             
             session.execute(
                 update_query,
                 {
-                    "metadata": json.dumps(metadata),
+                    "sections": json.dumps(new_data),
+                    "updated_at": datetime.utcnow(),
                     "id": source_id,
                 },
             )
             
             logger.info(
                 f"Updated {source_name} ({source_host})\n"
-                f"  Old sections: {old_sections}\n"
-                f"  New sections: {section_list}"
+                f"  Old section URLs: {old_urls}\n"
+                f"  New section URLs: {section_list}"
             )
             updated_count += 1
         

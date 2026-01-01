@@ -1,7 +1,7 @@
 import os
 import tempfile
 from typing import Optional
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from src.utils.byline_cleaner import BylineCleaner
 from src.utils.content_cleaner_balanced import BalancedBoundaryContentCleaner

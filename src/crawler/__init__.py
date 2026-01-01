@@ -746,20 +746,29 @@ class ContentExtractor:
 
         # Initialize multi-proxy manager
         self.proxy_manager = get_proxy_manager()
+
+        # MODIFIED: Override to SQUID provider when using Squid proxy
+        squid_proxy_url = os.getenv("SQUID_PROXY_URL")
+        if squid_proxy_url:
+            # Force provider to SQUID for semantic correctness
+            from .proxy_config import ProxyProvider
+
+            self.proxy_manager._active_provider = ProxyProvider.SQUID
+            logger.info(
+                f"🔀 Proxy provider overridden to SQUID (using {squid_proxy_url})"
+            )
+
         logger.info(
             f"🔀 Proxy manager initialized with provider: "
             f"{self.proxy_manager.active_provider.value}"
         )
 
-        # Warn if unblock proxy credentials are missing in production style deployments
-        if self.proxy_manager.active_provider.value == "decodo":
-            if not os.getenv("UNBLOCK_PROXY_USER") or not os.getenv(
-                "UNBLOCK_PROXY_PASS"
-            ):
-                logger.warning(
-                    "No UNBLOCK proxy credentials present in environment while PROXY_PROVIDER=decodo; "
-                    "if strong bot-protected domains are present the unblock proxy may be required."
-                )
+        # MODIFIED: Use Squid proxy for all proxy traffic
+        # All proxy traffic now routes through residential Squid proxy
+        squid_proxy_url = os.getenv(
+            "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+        )
+        logger.info(f"All proxy traffic routing through Squid: {squid_proxy_url}")
 
         # Set initial user agent
         self.current_user_agent = user_agent or random.choice(self.user_agent_pool)
@@ -813,35 +822,29 @@ class ContentExtractor:
         # Configure proxy based on active provider
         active_provider = self.proxy_manager.active_provider
 
+        # MODIFIED: Disable Origin proxy - route ALL traffic through Squid
         # Check if we should use origin proxy (backward compatibility)
         use_origin = os.getenv("USE_ORIGIN_PROXY", "").lower() in ("1", "true", "yes")
 
         if active_provider.value == "origin" or use_origin:
-            # Use origin-style proxy adapter (URL rewriting)
-            try:
-                enable_origin_proxy(self.session)
-                proxy_url = (
-                    os.getenv("ORIGIN_PROXY_URL")
-                    or os.getenv("PROXY_HOST")
-                    or os.getenv("PROXY_URL")
-                )
-                logger.info(
-                    f"🔀 Origin proxy adapter enabled "
-                    f"(proxy: {proxy_url or 'default'})"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to install origin proxy adapter: {e}")
+            # DISABLED: Origin proxy - using Squid instead
+            logger.info("🔀 Origin proxy disabled - routing through Squid instead")
+            squid_proxy_url = os.getenv(
+                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+            )
+            squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
+            self.session.proxies.update(squid_proxies)
 
         elif active_provider.value != "direct":
-            # Use standard proxies from ProxyManager (HTTP/HTTPS/SOCKS5)
-            proxies = self.proxy_manager.get_requests_proxies()
-            if proxies:
-                self.session.proxies.update(proxies)
-                logger.info(
-                    f"🔀 Standard proxy enabled: {active_provider.value} "
-                    f"({list(proxies.keys())})"
-                )
-
+            # MODIFIED: Route all proxy traffic through Squid instead of Decodo
+            squid_proxy_url = os.getenv(
+                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+            )
+            squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
+            self.session.proxies.update(squid_proxies)
+            logger.info(
+                f"🔀 Squid proxy enabled for HTTP extraction: {squid_proxy_url}"
+            )
         else:
             # Direct connection (no proxy)
             logger.info("🔀 Direct connection (no proxy)")
@@ -937,21 +940,23 @@ class ContentExtractor:
             )
 
             if active_provider.value == "origin" or use_origin:
-                # Use origin-style proxy adapter
-                try:
-                    enable_origin_proxy(new_session)
-                except Exception as e:
-                    logger.debug(
-                        f"Failed to install origin proxy on domain "
-                        f"session for {domain}: {e}"
-                    )
+                # DISABLED: Origin proxy - using Squid instead
+                logger.info(
+                    f"🔀 Origin proxy disabled for {domain} - routing through Squid instead"
+                )
+                squid_proxy_url = os.getenv(
+                    "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+                )
+                squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
+                new_session.proxies.update(squid_proxies)
 
             elif active_provider.value != "direct":
-                # Get fresh proxies (forces IP rotation for providers like Decodo)
-                # This is crucial: rotating UA without rotating IP looks suspicious
-                proxies = self.proxy_manager.get_requests_proxies()
-                if proxies:
-                    new_session.proxies.update(proxies)
+                # MODIFIED: Route domain sessions through Squid instead of Decodo
+                squid_proxy_url = os.getenv(
+                    "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+                )
+                squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
+                new_session.proxies.update(squid_proxies)
 
             # Assign sticky proxy per domain when pool provided (legacy)
             proxy = self._choose_proxy_for_domain(domain)
@@ -1268,7 +1273,7 @@ class ContentExtractor:
         """Mark a domain as requiring special extraction method.
 
         Called when we detect bot protection that requires non-standard extraction.
-        For strong protections like PerimeterX, use 'unblock' method with Decodo API.
+        For strong protections like PerimeterX, use 'unblock' method with Squid proxy.
         For other JS protections, use 'selenium' method.
 
         Args:
@@ -1561,7 +1566,7 @@ class ContentExtractor:
         if extraction_method == "unblock":
             logger.info(
                 f"🔓 Domain {domain} uses unblock proxy extraction "
-                f"(protection: {protection_type}) - using Decodo API"
+                f"(protection: {protection_type}) - using Squid proxy"
             )
         elif extraction_method == "selenium":
             logger.info(
@@ -1732,7 +1737,7 @@ class ContentExtractor:
         self._apply_cms_metadata_fallback(result)
         missing_fields = self._get_missing_fields(result)
 
-        # For domains marked as 'unblock', use Decodo proxy instead of Selenium
+        # For domains marked as 'unblock', use Squid proxy instead of Selenium
         if extraction_method == "unblock" and missing_fields:
             try:
                 logger.info(
@@ -2673,9 +2678,9 @@ class ContentExtractor:
         browser_actions: Optional[list] = None,
         metrics: Optional[ExtractionMetrics] = None,
     ) -> Dict[str, Any]:
-        """Extract content using Decodo unblock proxy API for strong bot protection.
+        """Extract content using Squid proxy for strong bot protection.
 
-        Uses Decodo's headless browser API with special headers to bypass
+        Routes requests through residential Squid proxy to bypass
         PerimeterX, DataDome, and other enterprise bot protections.
 
         Args:
@@ -2689,50 +2694,18 @@ class ContentExtractor:
 
             warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
-            # Get Decodo unblock proxy credentials from env
-            proxy_url_env = os.getenv(
-                "UNBLOCK_PROXY_URL", "https://unblock.decodo.com:60000"
+            # MODIFIED: Use Squid proxy instead of Decodo unblock proxy
+            # Route ALL unblock traffic through residential Squid proxy
+            squid_proxy_url = os.getenv(
+                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
             )
-            proxy_user = os.getenv("UNBLOCK_PROXY_USER")
-            proxy_pass = os.getenv("UNBLOCK_PROXY_PASS")
 
-            # Warn if UNBLOCK credentials are not set; fallback will attempt
-            # rotating DECODO proxies or API POST if configured. This avoids
-            # silent use of hardcoded fallback credentials.
-            if not proxy_user or not proxy_pass:
-                logger.warning(
-                    "UNBLOCK_PROXY_USER/PASS not set - UNBLOCK proxy credentials missing; "
-                    "will fall back to rotating DECODO proxies or POST API if configured"
-                )
+            logger.info(f"Using Squid proxy for unblock extraction: {squid_proxy_url}")
 
-            # Build authenticated proxy URL
-            if "://" in proxy_url_env:
-                scheme, remainder = proxy_url_env.split("://", 1)
-                proxy_url = f"{scheme}://{proxy_user}:{proxy_pass}@{remainder}"
-            else:
-                proxy_url = f"https://{proxy_user}:{proxy_pass}@{proxy_url_env}"
+            # Use Squid proxy directly (no authentication needed for this Squid setup)
+            proxy_url = squid_proxy_url
 
-            # Generate randomized fingerprint headers so each unblock request looks unique
-            session_id = uuid.uuid4().hex
-            device_id = uuid.uuid4().hex
-            fingerprint = hashlib.sha256(
-                f"{session_id}:{device_id}:{random.random()}".encode()
-            ).hexdigest()
-            forwarded_for = ".".join(str(random.randint(1, 254)) for _ in range(4))
-
-            with self._unblock_rate_limit_lock:
-                now = time.time()
-                if self._unblock_last_request_ts > 0.0:
-                    wait = self.unblock_rate_limit_seconds - (
-                        now - self._unblock_last_request_ts
-                    )
-                    if wait > 0:
-                        logger.debug(
-                            f"Sleeping {wait:.2f}s to satisfy unblock proxy rate limit"
-                        )
-                        time.sleep(wait)
-                self._unblock_last_request_ts = time.time()
-
+            # Use standard browser headers for Squid proxy (no special Decodo headers needed)
             user_agent_pool = [
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
@@ -2740,373 +2713,133 @@ class ContentExtractor:
             ]
             user_agent = random.choice(user_agent_pool)
 
-            client_hint_pool = [
-                {
-                    "sec-ch-ua": '"Chromium";v="120", "Google Chrome";v="120", "Not?A Brand";v="24"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"Windows"',
-                },
-                {
-                    "sec-ch-ua": '"Chromium";v="120", "Microsoft Edge";v="120", "Not?A Brand";v="24"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"Windows"',
-                },
-                {
-                    "sec-ch-ua": '"Not.A/Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"macOS"',
-                },
-            ]
-            client_hints = random.choice(client_hint_pool)
-
-            # Decodo API headers for headless browser
+            # Standard browser headers for Squid proxy
             headers = {
-                "X-SU-Session-Id": session_id,
-                "X-SU-Device-Id": device_id,
-                "X-SU-Fingerprint": fingerprint,
-                "X-SU-Forwarded-For": forwarded_for,
-                "X-SU-Geo": "United States",
-                "X-SU-Locale": "en-us",
-                "X-SU-Headless": "html",
                 "User-Agent": user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate",
+                "Cache-Control": "max-age=0",
             }
-            headers.update(client_hints)
 
-            # Force identity encoding so Decodo returns the full HTML payload and
-            # rotate other headers to mimic real browsers.
-            headers.update(
-                {
-                    "Accept": random.choice(self.accept_header_pool),
-                    "Accept-Language": random.choice(self.accept_language_pool),
-                    "Accept-Encoding": "identity",
-                    "Cache-Control": "max-age=0",
-                }
-            )
+            logger.info(f"Fetching {url} via Squid proxy at {squid_proxy_url}")
 
-            logger.info(f"Fetching {url} via Decodo unblock proxy")
-
-            # Helper to mask proxy host for metadata/logging (avoid leaking creds)
-            from urllib.parse import urlparse
-
-            def _host_from_proxy(proxy: str) -> str:
-                try:
-                    parsed = urlparse(proxy)
-                    return parsed.hostname or str(parsed.netloc)
-                except Exception:
-                    return proxy
-
-            # Primary request logic: fire CONNECT-style proxy first for reliability
-            prefer_api_post = os.getenv(
-                "UNBLOCK_PREFER_API_POST", "false"
-            ).strip().lower() in (
-                "1",
-                "true",
-                "yes",
-            )
-
-            response = None
-            used_proxy_host = None
-            used_proxy_provider = None
-            used_proxy_url = None
-            used_proxy_authenticated = False
-            used_proxy_status_str = None
-
-            def _mark_response(resp, provider, proxy_url_value, authenticated):
-                nonlocal used_proxy_host, used_proxy_provider, used_proxy_url
-                nonlocal used_proxy_authenticated, used_proxy_status_str
-
-                used_proxy_provider = provider
-                used_proxy_url = proxy_url_value
-                used_proxy_authenticated = authenticated
-                used_proxy_host = (
-                    urlparse(proxy_url_value).hostname
-                    if provider.startswith("unblock_api")
-                    else _host_from_proxy(proxy_url_value)
+            # Simple request through Squid proxy
+            try:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    proxies={"http": proxy_url, "https": proxy_url},
+                    verify=False,
+                    timeout=30,
                 )
 
-                if resp is None:
-                    used_proxy_status_str = "failed"
-                else:
-                    status_ok = 200 <= resp.status_code < 300
-                    html = resp.text or ""
-                    long_enough = len(html) >= UNBLOCK_MIN_HTML_BYTES
-                    challenge = "Access to this page has been denied" in html
-                    used_proxy_status_str = (
-                        "success"
-                        if status_ok and long_enough and not challenge
-                        else "failed"
-                    )
-
-                return used_proxy_status_str == "success"
-
-            def _attempt_connect() -> bool:
-                nonlocal response
-                try:
-                    connect_resp = requests.get(
-                        url,
-                        headers=headers,
-                        proxies={"http": proxy_url, "https": proxy_url},
-                        verify=False,
-                        timeout=30,
-                    )
-                    response = connect_resp
-                    return _mark_response(
-                        connect_resp,
-                        "unblock_proxy",
-                        proxy_url,
-                        bool(proxy_user and proxy_pass),
-                    )
-                except (
-                    Exception
-                ) as exc:  # pragma: no cover - network errors exercised in test
-                    logger.warning(f"Decodo CONNECT attempt failed for {url}: {exc}")
-                    return False
-
-            def _attempt_api(payload: dict[str, object]) -> bool:
-                nonlocal response
-                try:
-                    api_resp = requests.post(
-                        proxy_url_env,
-                        json=payload,
-                        headers=headers,
-                        auth=(proxy_user, proxy_pass),
-                        verify=False,
-                        timeout=30,
-                    )
-                    response = api_resp
-                    return _mark_response(
-                        api_resp,
-                        "unblock_api",  # provider string indicates API mode
-                        proxy_url_env,
-                        True,
-                    )
-                except Exception as exc:  # pragma: no cover - best-effort
-                    logger.warning(f"Decodo API POST attempt failed for {url}: {exc}")
-                    return False
-
-            success = False
-
-            # CONNECT attempt always runs first
-            success = _attempt_connect()
-
-            # Only try API mode when CONNECT failed or browser actions were requested
-            if not success:
-                if browser_actions:
-                    logger.debug(
-                        "CONNECT attempt failed; retrying Decodo API POST with browser_actions"
-                    )
-                    success = _attempt_api(
-                        {"url": url, "browser_actions": browser_actions}
-                    )
-                elif prefer_api_post:
-                    logger.debug(
-                        "CONNECT attempt failed; retrying Decodo API POST as secondary"
-                    )
-                    success = _attempt_api({"url": url})
-                else:
-                    logger.debug(
-                        "CONNECT attempt failed; skipping Decodo API POST because UNBLOCK_PREFER_API_POST is false"
-                    )
-
-            if not success and response is None:
-                response = None
-
-            html = response.text if response is not None else ""
-            html_len = len(html)
-            challenge_detected = "Access to this page has been denied" in html
-
-            logger.info(
-                f"Unblock proxy returned {html_len} bytes for {url} (provider: {used_proxy_provider}, host: {used_proxy_host}, url: {mask_proxy_url(used_proxy_url)})"
-            )
-
-            # Check if still blocked
-            if (
-                response is None
-                or challenge_detected
-                or html_len < UNBLOCK_MIN_HTML_BYTES
-            ):
-                logger.warning(
-                    f"Unblock proxy may be blocked or returned small HTML for {url} (len={html_len}, challenge={challenge_detected}); attempting fallbacks"
-                )
-
-                # Fallback 1: Try rotating DECODO provider via ProxyManager (proxy manager may be configured to DECODO)
-                try:
-                    proxies = None
-                    pm = getattr(self, "proxy_manager", None)
-                    if pm is not None:
-                        proxies = pm.get_requests_proxies()
-                        if proxies:
-                            logger.info(
-                                f"Attempting rotating Decodo GET fallback for {url} using proxies: {list(proxies.keys())}"
-                            )
-                            try:
-                                proxied_response = requests.get(
-                                    url,
-                                    headers=headers,
-                                    proxies=proxies,
-                                    verify=False,
-                                    timeout=30,
-                                )
-                                proxied_html = proxied_response.text
-                                if (
-                                    proxied_response.status_code == 200
-                                    and len(proxied_html) >= UNBLOCK_MIN_HTML_BYTES
-                                    and "Access to this page has been denied"
-                                    not in proxied_html
-                                ):
-                                    response = proxied_response
-                                    html = proxied_html
-                                    html_len = len(html)
-                                    used_proxy_host = _host_from_proxy(
-                                        proxies.get("https") or proxies.get("http")
-                                    )
-                                    used_proxy_url = proxies.get(
-                                        "https"
-                                    ) or proxies.get("http")
-                                    used_proxy_authenticated = True
-                                    used_proxy_status_str = "success"
-                                    used_proxy_provider = "decodo_rotating"
-                                    logger.info(
-                                        f"Rotating Decodo fallback succeeded for {url} (len={html_len})"
-                                    )
-                            except Exception as e:  # pragma: no cover - best-effort
-                                logger.debug(
-                                    f"Rotating Decodo fallback failed for {url}: {e}"
-                                )
-
-                    # Fallback 2: Try Decodo API POST (even without browser_actions), using auth
-                    if response is None or len(html) < UNBLOCK_MIN_HTML_BYTES:
-                        if prefer_api_post:
-                            logger.info(
-                                f"Attempting Decodo API POST fallback for {url}"
-                            )
-                            try:
-                                api_url = proxy_url_env
-                                post_response = requests.post(
-                                    api_url,
-                                    json={"url": url},
-                                    headers=headers,
-                                    auth=(proxy_user, proxy_pass),
-                                    verify=False,
-                                    timeout=30,
-                                )
-                                if (
-                                    post_response.status_code == 200
-                                    and len(post_response.text)
-                                    >= UNBLOCK_MIN_HTML_BYTES
-                                    and "Access to this page has been denied"
-                                    not in post_response.text
-                                ):
-                                    response = post_response
-                                    html = post_response.text
-                                    html_len = len(html)
-                                    used_proxy_host = urlparse(api_url).hostname
-                                    used_proxy_url = api_url
-                                    used_proxy_authenticated = True
-                                    used_proxy_status_str = "success"
-                                    used_proxy_provider = "unblock_api_post"
-                                    logger.info(
-                                        f"Decodo API POST fallback succeeded for {url} (len={html_len})"
-                                    )
-                            except Exception as e:  # pragma: no cover
-                                logger.debug(
-                                    f"Decodo API POST fallback failed for {url}: {e}"
-                                )
-                        else:
-                            logger.debug(
-                                "Skipping Decodo API POST fallback because UNBLOCK_PREFER_API_POST is false"
-                            )
-
-                except Exception as e:
-                    logger.debug(f"Unblock fallback attempts failed for {url}: {e}")
-
-                # After fallbacks, if nothing succeeded or we still have a challenge page, raise exception
-                # Do NOT return empty dict - that would trigger fallback to Selenium
+                html = response.text
                 html_len = len(html)
-                challenge_detected = "Access to this page has been denied" in html
-                if (
-                    response is None
-                    or html_len < UNBLOCK_MIN_HTML_BYTES
-                    or challenge_detected
-                ):
-                    if challenge_detected:
-                        logger.warning(
-                            f"Unblock proxy returned challenge page for {url}; marking for retry (no fallback)"
-                        )
 
-                    proxy_status = "failed"  # All failure modes map to "failed" status
-                    proxy_error = (
-                        "challenge_page"
-                        if challenge_detected
-                        else ("no_response" if response is None else "small_response")
-                    )
-
-                    used_proxy_status_str = proxy_status
-
-                    if metrics:
-                        metrics.set_proxy_metrics(
-                            proxy_used=bool(used_proxy_provider),
-                            proxy_url=mask_proxy_url(used_proxy_url),
-                            proxy_authenticated=bool(used_proxy_authenticated),
-                            proxy_status=proxy_status,
-                            proxy_error=proxy_error,
-                        )
-
-                    # Raise exception to prevent fallback - article should be retried later
-                    raise ProxyChallengeError(
-                        f"Proxy challenge/block detected for {url}: {proxy_error}"
-                    )
-
-            # Update wire hints from HTML
-            self._update_wire_hints_from_html(html, url)
-
-            # Parse with BeautifulSoup
-            soup = BeautifulSoup(html, "html.parser")
-
-            result = {
-                "url": url,
-                "title": self._extract_title(soup),
-                "author": self._extract_author(soup),
-                "publish_date": self._extract_published_date(soup, html),
-                "content": self._extract_content(soup),
-                "metadata": {
-                    "meta_description": self._extract_meta_description(soup),
-                    "extraction_method": "unblock_proxy",
-                    "proxy_used": True,
-                    "proxy_host": used_proxy_host,
-                    "proxy_provider": used_proxy_provider,
-                    "proxy_url": mask_proxy_url(used_proxy_url),
-                    "proxy_authenticated": bool(used_proxy_authenticated),
-                    "proxy_status": used_proxy_status_str,
-                    "page_source_length": html_len,
-                    "http_status": response.status_code,
-                },
-                "extracted_at": datetime.utcnow().isoformat(),
-            }
-
-            self._attach_publish_date_fallback_metadata(result)
-
-            # Record proxy metrics into ExtractionMetrics if provided
-            if metrics:
-                metrics.set_proxy_metrics(
-                    proxy_used=bool(result["metadata"].get("proxy_used")),
-                    proxy_url=result["metadata"].get("proxy_url"),
-                    proxy_authenticated=result["metadata"].get(
-                        "proxy_authenticated", False
-                    ),
-                    proxy_status=result["metadata"].get("proxy_status"),
-                    proxy_error=None,
+                logger.info(
+                    f"Squid proxy returned {html_len} bytes for {url} (status: {response.status_code})"
                 )
 
-            logger.info(f"✅ Unblock proxy extraction succeeded for {url}")
-            return result
+                # Check for challenge page content patterns FIRST (before size check)
+                html_lower = html.lower()
+                challenge_patterns = [
+                    "access denied",
+                    "blocked by",
+                    "access to this page has been denied",
+                    "bot protection",
+                    "security check",
+                    "please wait while we verify",
+                    "browser check",
+                    "are you a robot",
+                    "please verify you are human",
+                    "please complete the captcha",
+                    "solve the captcha",
+                    "captcha challenge",
+                    "attention required! cloudflare",
+                    "just a moment...",
+                    "checking your browser",
+                ]
 
-        except ProxyChallengeError:
-            # Re-raise ProxyChallengeError to prevent fallback
-            raise
+                if any(pattern in html_lower for pattern in challenge_patterns):
+                    logger.warning(f"Challenge page detected for {url}: proxy blocked")
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: challenge_page"
+                    )
+
+                # Check if extraction was successful (accept any successful response, not just 200)
+                if response.status_code >= 400 or html_len < 1000:
+                    logger.warning(
+                        f"Squid proxy returned small/failed response for {url} (len={html_len}, status={response.status_code})"
+                    )
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: status_{response.status_code}"
+                    )
+
+                # Check for suspiciously short responses (often challenge pages)
+                if html_len < 500 and response.status_code in [403, 503]:
+                    logger.warning(
+                        f"Suspicious short response for {url} (len={html_len}, status={response.status_code})"
+                    )
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: suspicious_short_response"
+                    )
+
+            except Exception as e:
+                logger.error(f"Squid proxy request failed for {url}: {e}")
+                # Don't wrap ProxyChallengeError - let it pass through with original message
+                if isinstance(e, ProxyChallengeError):
+                    raise e
+                raise ProxyChallengeError(
+                    f"Proxy challenge/block detected for {url}: {type(e).__name__}"
+                )
+
+            # Extract content using newspaper3k from the HTML
+            try:
+                from newspaper import Article
+
+                article = Article(url)
+                # Set the HTML content directly
+                article.download_state = 2  # Article.ArticleDownloadState.SUCCESS
+                article.html = html
+                article.parse()
+
+                # Build result dict
+                result = {
+                    "url": url,
+                    "title": article.title or "",
+                    "content": article.text or "",
+                    "author": ", ".join(article.authors) if article.authors else "",
+                    "publish_date": (
+                        article.publish_date.isoformat() if article.publish_date else ""
+                    ),
+                    "method": "squid_proxy",
+                }
+
+                logger.info(
+                    f"✅ Squid proxy extraction successful for {url}: {len(result['content'])} chars"
+                )
+                return result
+
+            except Exception as e:
+                logger.error(f"Content parsing failed for {url}: {e}")
+                return {
+                    "url": url,
+                    "title": "",
+                    "content": "",
+                    "author": "",
+                    "publish_date": "",
+                    "method": "squid_proxy",
+                }
+
         except Exception as e:
-            logger.error(f"Unblock proxy extraction failed for {url}: {e}")
-            return {}
+            logger.error(f"Squid proxy extraction failed for {url}: {e}")
+            # Don't wrap ProxyChallengeError - let it pass through with original message
+            if isinstance(e, ProxyChallengeError):
+                raise e
+            raise ProxyChallengeError(
+                f"Proxy challenge/block detected for {url}: {str(e)}"
+            )
 
     def _extract_with_selenium(self, url: str) -> Dict[str, Any]:
         """Extract content using persistent Selenium driver."""

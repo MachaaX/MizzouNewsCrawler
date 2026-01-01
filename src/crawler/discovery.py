@@ -2565,6 +2565,71 @@ class NewsDiscovery:
 
             logger.info(f"Building newspaper source for: {source_url}")
 
+            # Check if source has manually configured section URLs
+            # If so, skip homepage and use sections only
+            skip_homepage_use_sections_only = False
+            if source_id:
+                try:
+                    from src.models.database import DatabaseManager
+
+                    with DatabaseManager(self.database_url).engine.connect() as conn:
+                        result = safe_execute(
+                            conn,
+                            "SELECT discovered_sections FROM sources WHERE id = :id",
+                            {"id": source_id},
+                        ).fetchone()
+
+                        if result and result[0]:
+                            sections_data = result[0]
+                            if isinstance(sections_data, str):
+                                sections_data = json.loads(sections_data)
+
+                            # If discovery_method is 'manual_configuration', skip homepage
+                            if (
+                                sections_data.get("discovery_method")
+                                == "manual_configuration"
+                            ):
+                                skip_homepage_use_sections_only = True
+                                logger.info(
+                                    "Source %s has manual section configuration, "
+                                    "skipping homepage discovery and using sections only",
+                                    source_url,
+                                )
+                except Exception as e:
+                    logger.debug("Failed to check for manual sections: %s", e)
+
+            # If using sections only, skip homepage and go straight to section discovery
+            if skip_homepage_use_sections_only:
+                section_articles = self._discover_from_section_urls(
+                    source_url=source_url,
+                    source_id=source_id,
+                    source_meta=source_meta,
+                )
+
+                if section_articles:
+                    logger.info(
+                        "Manual section discovery found %d articles for %s",
+                        len(section_articles),
+                        source_url,
+                    )
+                    record_newspaper_effectiveness(
+                        DiscoveryMethodStatus.SUCCESS,
+                        len(section_articles),
+                        notes="manual section configuration (homepage skipped)",
+                    )
+                else:
+                    logger.warning(
+                        "Manual section discovery found 0 articles for %s",
+                        source_url,
+                    )
+                    record_newspaper_effectiveness(
+                        DiscoveryMethodStatus.NO_FEED,
+                        0,
+                        notes="manual section configuration returned 0 articles",
+                    )
+
+                return section_articles
+
             # Quick homepage sniff: try to find RSS/Atom link tags on the
             # site's root page and prefer RSS discovery (much faster than
             # building the whole newspaper index which can hit many URLs).
