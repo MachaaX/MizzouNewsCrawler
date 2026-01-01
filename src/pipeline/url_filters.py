@@ -3,7 +3,6 @@ from urllib.parse import urlparse, urlunparse
 
 from storysniffer import StorySniffer
 
-
 FILE_EXTENSION_MARKERS = (
     ".jpg",
     ".png",
@@ -52,13 +51,13 @@ def _normalize_url_for_patterns(raw_url: str | None) -> str:
 def check_is_article(url, discovery_method="unknown"):
     """Conservative article detection focusing on URL path structure patterns."""
     url_lower = _normalize_url_for_patterns(url)
-    
+
     # Non-article URL patterns - designed to catch obvious non-article pages
     # Removed overly aggressive patterns like /category/, /tag/, /page/ to reduce false negatives
     # File extensions checked separately to ensure proper matching after normalization
     non_article_patterns = [
         "/search/",
-        "/author/", 
+        "/author/",
         "/rss/",
         "/feed/",
         "/sitemap/",
@@ -76,7 +75,7 @@ def check_is_article(url, discovery_method="unknown"):
         ".xml",
         ".jpeg",
         ".svg",
-        ".json"
+        ".json",
     ]
     for pattern in non_article_patterns:
         if pattern in url_lower:
@@ -86,11 +85,16 @@ def check_is_article(url, discovery_method="unknown"):
     # Using consistent pattern matching: some with path segments (/video/), some without (/watch)
     if "/video/" in url_lower or "/watch/" in url_lower or "/videos/" in url_lower:
         return False
-    
+
     # Filter audio/podcast content
-    if '/audio/' in url_lower or '/listen/' in url_lower or '/podcast/' in url_lower or '/podcasts/' in url_lower:
+    if (
+        "/audio/" in url_lower
+        or "/listen/" in url_lower
+        or "/podcast/" in url_lower
+        or "/podcasts/" in url_lower
+    ):
         return False
-    
+
     # Article-like patterns
     if re.search(r"/stories?/[^/]+", url_lower):
         return True
