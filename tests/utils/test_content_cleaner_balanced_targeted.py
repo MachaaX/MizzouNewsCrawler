@@ -129,7 +129,7 @@ class TestDomainAnalysis:
         mock_db.get_session.return_value.__exit__.return_value = None
 
         with patch.object(cleaner, '_connect_to_db', return_value=mock_db):
-            articles = cleaner._get_articles_for_domain(\"example.com\")
+            articles = cleaner._get_articles_for_domain("example.com")
 
         assert len(articles) == 2
         assert articles[0]["id"] == 1
