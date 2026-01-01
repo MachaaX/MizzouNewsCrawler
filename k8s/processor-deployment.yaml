@@ -27,6 +27,8 @@ spec:
           - python
           - orchestration/continuous_processor.py
         env:
+        - name: PYTHONPATH
+          value: "/app:/opt/origin-shim"
         # Database configuration
         - name: DATABASE_ENGINE
           value: "postgresql+psycopg2"
