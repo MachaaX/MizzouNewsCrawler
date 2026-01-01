@@ -1074,8 +1074,7 @@ class ComprehensiveExtractionTelemetry:
             )
             host_entry["attempts"] += 1
             if created_at and (
-                host_entry["last_seen"] is None
-                or created_at > host_entry["last_seen"]
+                host_entry["last_seen"] is None or created_at > host_entry["last_seen"]
             ):
                 host_entry["last_seen"] = created_at
 
@@ -1196,14 +1195,16 @@ class ComprehensiveExtractionTelemetry:
                 {
                     **stats,
                     "success_rate": stats["successes"] / attempts if attempts else 0.0,
-                    "unblock_success_rate": stats["unblock_successes"]
-                    / unblock_attempts
-                    if unblock_attempts
-                    else 0.0,
-                    "selenium_success_rate": stats["selenium_successes"]
-                    / selenium_attempts
-                    if selenium_attempts
-                    else 0.0,
+                    "unblock_success_rate": (
+                        stats["unblock_successes"] / unblock_attempts
+                        if unblock_attempts
+                        else 0.0
+                    ),
+                    "selenium_success_rate": (
+                        stats["selenium_successes"] / selenium_attempts
+                        if selenium_attempts
+                        else 0.0
+                    ),
                 }
             )
 
