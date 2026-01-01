@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from typing import Optional
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 
 import pytest
 
@@ -411,40 +411,42 @@ def test_get_articles_for_domain_with_mocked_db():
     """Test that _get_articles_for_domain works with mocked database."""
     cleaner = BalancedBoundaryContentCleaner(db_path=":memory:")
 
-    # Mock the database manager and session
-    mock_db = Mock()
+    # Create mock session and result
     mock_session = Mock()
-    mock_db.get_session.return_value.__enter__.return_value = mock_session
-    mock_db.get_session.return_value.__exit__.return_value = None
-
-    # Create mock data
-    mock_data = [
+    mock_result = Mock()
+    mock_result.fetchall.return_value = [
         (
             1,
             "https://example.com/a",
             "Article 1 content",
-            "hash1",
+            "content_hash_123",
         ),
         (
             2,
             "https://example.com/b",
             "Article 2 content",
-            "hash2",
+            "content_hash_456",
         ),
     ]
-
-    # Create result that properly mocks SQLAlchemy's result proxy
-    mock_result = Mock()
-    mock_result.fetchall.return_value = mock_data
     mock_session.execute.return_value = mock_result
 
-    # Mock _connect_to_db to return our mock database
-    with patch.object(cleaner, "_connect_to_db", return_value=mock_db):
+    # Mock the database connection to return our session
+    with patch.object(cleaner, "_connect_to_db") as mock_connect:
+        mock_db = Mock()
+        # Create a proper context manager mock
+        mock_session_context = MagicMock()
+        mock_session_context.__enter__.return_value = mock_session
+        mock_session_context.__exit__.return_value = None
+        mock_db.get_session.return_value = mock_session_context
+        mock_connect.return_value = mock_db
+
+        # Call the method under test
         articles = cleaner._get_articles_for_domain("example.com")
 
+    # Verify results
     assert len(articles) == 2
     assert articles[0]["url"] == "https://example.com/a"
-    assert articles[1]["text_hash"] == "hash2"
+    assert articles[1]["text_hash"] == "content_hash_456"
     mock_session.execute.assert_called_once()
 
 

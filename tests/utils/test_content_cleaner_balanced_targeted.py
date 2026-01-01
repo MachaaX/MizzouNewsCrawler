@@ -1,7 +1,7 @@
 import os
 import tempfile
 from typing import Optional
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
 
 from src.utils.byline_cleaner import BylineCleaner
 from src.utils.content_cleaner_balanced import BalancedBoundaryContentCleaner
@@ -123,12 +123,17 @@ class TestDomainAnalysis:
         mock_session = Mock()
         mock_session.execute.return_value = mock_result
 
-        # Mock _connect_to_db to return our mock database
-        mock_db = Mock()
-        mock_db.get_session.return_value.__enter__.return_value = mock_session
-        mock_db.get_session.return_value.__exit__.return_value = None
+        # Mock the database connection to return our session
+        with patch.object(cleaner, "_connect_to_db") as mock_connect:
+            mock_db = Mock()
+            # Create a proper context manager mock
+            mock_session_context = MagicMock()
+            mock_session_context.__enter__.return_value = mock_session
+            mock_session_context.__exit__.return_value = None
+            mock_db.get_session.return_value = mock_session_context
+            mock_connect.return_value = mock_db
 
-        with patch.object(cleaner, "_connect_to_db", return_value=mock_db):
+            # Call the method under test
             articles = cleaner._get_articles_for_domain("example.com")
 
         assert len(articles) == 2
