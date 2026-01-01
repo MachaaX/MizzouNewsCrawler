@@ -282,8 +282,14 @@ def test_http_session_configured_with_squid_proxy():
             app = FastAPI(lifespan=lifespan)
             with TestClient(app):
                 proxies = app.state.http_session.proxies
-                assert proxies["http"] == "http://proxy-user:proxy-pass@squid-proxy.internal:8080"
-                assert proxies["https"] == "http://proxy-user:proxy-pass@squid-proxy.internal:8080"
+                assert (
+                    proxies["http"]
+                    == "http://proxy-user:proxy-pass@squid-proxy.internal:8080"
+                )
+                assert (
+                    proxies["https"]
+                    == "http://proxy-user:proxy-pass@squid-proxy.internal:8080"
+                )
         finally:
             proxy_config._proxy_manager = original_manager
 
