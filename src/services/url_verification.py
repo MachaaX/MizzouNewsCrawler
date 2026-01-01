@@ -188,6 +188,11 @@ class URLVerificationService:
 
         proxies = self.proxy_manager.get_requests_proxies()
         if proxies:
+            if (
+                not hasattr(self.http_session, "proxies")
+                or self.http_session.proxies is None
+            ):
+                self.http_session.proxies = {}
             self.http_session.proxies.update(proxies)
             self.logger.info(
                 "🔐 Verification using %s provider (%s)",

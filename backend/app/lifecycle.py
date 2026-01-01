@@ -22,6 +22,9 @@ from sqlalchemy import text
 from fastapi import FastAPI, Request
 from sqlalchemy.exc import OperationalError
 
+from src.crawler.proxy_config import get_proxy_manager
+from src.crawler.utils import mask_proxy_url
+
 if TYPE_CHECKING:
     from src.models.database import DatabaseManager as _DatabaseManagerProtocol
     from src.telemetry.store import TelemetryStore as _TelemetryStoreProtocol
@@ -58,6 +61,40 @@ except Exception:
     DatabaseManager = None
 else:
     DatabaseManager = _DatabaseManager
+
+
+def _configure_http_session_proxies(session: requests.Session) -> None:
+    """Configure the shared HTTP session to honor the active proxy provider."""
+
+    try:
+        proxy_manager = get_proxy_manager()
+    except Exception as exc:  # pragma: no cover - proxy layer optional in tests
+        logger.warning(
+            "Proxy manager unavailable; using direct HTTP session: %s", exc
+        )
+        return
+
+    try:
+        proxies = proxy_manager.get_requests_proxies()
+        if not proxies:
+            logger.info("HTTP session configured for direct connections")
+            return
+
+        session.proxies.update(proxies)
+        active_provider = getattr(proxy_manager, "active_provider", None)
+        provider_name = (
+            getattr(active_provider, "value", str(active_provider))
+            if active_provider is not None
+            else "unknown"
+        )
+        masked_proxy = mask_proxy_url(proxies.get("https") or proxies.get("http"))
+        logger.info(
+            "HTTP session configured with %s proxy (%s)",
+            provider_name,
+            masked_proxy or "N/A",
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Failed to configure HTTP session proxies: %s", exc)
 
 
 async def startup_resources(app: FastAPI) -> None:
@@ -135,6 +172,7 @@ async def startup_resources(app: FastAPI) -> None:
             or getattr(app.state, "http_session") is None
         ):
             session = requests.Session()
+            _configure_http_session_proxies(session)
             app.state.http_session = session
             logger.info("HTTP session initialized")
         else:

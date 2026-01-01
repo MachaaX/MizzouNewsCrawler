@@ -17,7 +17,7 @@ from datetime import datetime
 from html import unescape
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -750,18 +750,21 @@ class ContentExtractor:
         squid_proxy_url = os.getenv(
             "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
         )
-        if (
-            squid_proxy_url
-            and self.proxy_manager.active_provider != ProxyProvider.SQUID
-        ):
-            self.proxy_manager.switch_provider(ProxyProvider.SQUID)
+        active_provider = self._resolve_active_proxy_provider()
+        if squid_proxy_url and active_provider != ProxyProvider.SQUID:
+            switch_provider = getattr(self.proxy_manager, "switch_provider", None)
+            if callable(switch_provider):
+                switch_provider(ProxyProvider.SQUID)
+            else:
+                # Test doubles may not implement switch_provider; coerce directly.
+                cast(Any, self.proxy_manager).active_provider = ProxyProvider.SQUID
+            active_provider = ProxyProvider.SQUID
             logger.info(
                 f"🔀 Proxy provider overridden to SQUID (using {squid_proxy_url})"
             )
 
         logger.info(
-            f"🔀 Proxy manager initialized with provider: "
-            f"{self.proxy_manager.active_provider.value}"
+            f"🔀 Proxy manager initialized with provider: " f"{active_provider.value}"
         )
 
         # MODIFIED: Use Squid proxy for all proxy traffic
@@ -820,7 +823,7 @@ class ContentExtractor:
 
         self.session.headers.update(headers)
 
-        active_provider = self.proxy_manager.active_provider
+        active_provider = self._resolve_active_proxy_provider()
         squid_proxy_url = os.getenv(
             "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
         )
@@ -846,6 +849,22 @@ class ContentExtractor:
         logger.debug(
             f"Updated session headers with UA: {self.current_user_agent[:50]}..."
         )
+
+    def _resolve_active_proxy_provider(self) -> ProxyProvider:
+        """Return the active proxy provider even when tests stub the manager."""
+
+        provider = getattr(self.proxy_manager, "active_provider", ProxyProvider.DIRECT)
+        if isinstance(provider, ProxyProvider):
+            return provider
+
+        # Many tests stub active_provider with SimpleNamespace(value="...")
+        raw_value = getattr(provider, "value", None)
+        if isinstance(raw_value, str):
+            for candidate in ProxyProvider:
+                if candidate.value == raw_value.lower():
+                    return candidate
+
+        return ProxyProvider.DIRECT
 
     def _get_domain_session(self, url: str):
         """Get or create a domain-specific session with user agent rotation."""
