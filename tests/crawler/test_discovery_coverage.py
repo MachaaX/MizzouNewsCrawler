@@ -437,37 +437,6 @@ def test_normalize_host_with_subdomain():
 # ============================================================================
 # Test Proxy Configuration
 # ============================================================================
-
-
-def test_configure_proxy_routing_with_origin_proxy():
-    """Test proxy configuration with origin proxy enabled."""
-    with patch("src.crawler.discovery.DatabaseManager"):
-        with patch("src.crawler.discovery.create_telemetry_system"):
-            with patch("src.crawler.discovery.enable_origin_proxy") as mock_enable:
-                with patch("src.crawler.discovery.get_proxy_manager") as mock_pm:
-                    mock_manager = MagicMock()
-                    mock_manager.active_provider.value = "origin"
-                    mock_manager.get_origin_proxy_url.return_value = "http://proxy:8080"
-                    mock_pm.return_value = mock_manager
-
-                    NewsDiscovery(database_url="sqlite:///:memory:")
-
-                    # Should have called enable_origin_proxy
-                    mock_enable.assert_called_once()
-
-
-def test_configure_proxy_routing_with_env_proxy():
-    """Test proxy configuration with USE_ORIGIN_PROXY env var."""
-    with patch("src.crawler.discovery.DatabaseManager"):
-        with patch("src.crawler.discovery.create_telemetry_system"):
-            with patch("src.crawler.discovery.enable_origin_proxy") as mock_enable:
-                with patch.dict(os.environ, {"USE_ORIGIN_PROXY": "true"}):
-                    NewsDiscovery(database_url="sqlite:///:memory:")
-
-                    # Should have called enable_origin_proxy
-                    mock_enable.assert_called_once()
-
-
 def test_configure_proxy_routing_with_proxy_pool():
     """Test proxy configuration with legacy proxy pool."""
     with patch("src.crawler.discovery.DatabaseManager"):
@@ -500,23 +469,6 @@ def test_configure_proxy_routing_with_provider_proxies():
 
                 # Should have merged proxies into pool
                 assert len(nd.proxy_pool) > 0
-
-
-def test_configure_proxy_routing_origin_proxy_failure():
-    """Test graceful handling when origin proxy setup fails."""
-    with patch("src.crawler.discovery.DatabaseManager"):
-        with patch("src.crawler.discovery.create_telemetry_system"):
-            with patch("src.crawler.discovery.enable_origin_proxy") as mock_enable:
-                mock_enable.side_effect = RuntimeError("Proxy error")
-                with patch("src.crawler.discovery.get_proxy_manager") as mock_pm:
-                    mock_manager = MagicMock()
-                    mock_manager.active_provider.value = "origin"
-                    mock_pm.return_value = mock_manager
-
-                    nd = NewsDiscovery(database_url="sqlite:///:memory:")
-
-                    # Should continue despite error
-                    assert nd is not None
 
 
 # ============================================================================

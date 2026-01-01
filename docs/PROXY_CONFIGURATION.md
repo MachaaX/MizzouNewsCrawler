@@ -23,14 +23,14 @@ This system provides flexible proxy configuration with support for multiple prov
 
 ## Supported Proxy Providers
 
-### 1. Origin Proxy (Default)
-**Current production proxy** - URL rewriting proxy
+### 1. Squid Proxy (Default)
+**Current production proxy** - authenticated Squid tier
 
 ```bash
-PROXY_PROVIDER=origin
-ORIGIN_PROXY_URL=http://proxy.kiesow.net:23432
-PROXY_USERNAME=your_username
-PROXY_PASSWORD=your_password
+PROXY_PROVIDER=squid
+SQUID_PROXY_URL=http://squid.proxy.net:3128
+SQUID_PROXY_USERNAME=your_username   # optional
+SQUID_PROXY_PASSWORD=your_password   # optional
 ```
 
 ### 2. Direct (No Proxy)
@@ -91,19 +91,6 @@ SMARTPROXY_USERNAME=user
 SMARTPROXY_PASSWORD=password
 ```
 
-### 8. Decodo ISP Proxy
-**ISP proxy service** - https://decodo.com/
-
-```bash
-PROXY_PROVIDER=decodo
-DECODO_USERNAME=your-decodo-username  # Set via env var or GCP Secret Manager
-DECODO_PASSWORD=your-decodo-password  # Set via env var or GCP Secret Manager
-DECODO_HOST=isp.decodo.com            # Default provided
-DECODO_PORT=10000                     # Default provided
-DECODO_COUNTRY=us                     # Target country
-```
-
-**Note:** Set credentials via environment variables or GCP Secret Manager. Decodo provider is disabled if no credentials are provided.
 
 ---
 
@@ -131,8 +118,8 @@ kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=direct
 # Switch to BrightData
 kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=brightdata
 
-# Back to origin
-kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=origin
+# Back to Squid
+kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=squid
 ```
 
 **Option B: Runtime Switch (Current Process Only)**
@@ -351,8 +338,8 @@ $ python -m src.cli.cli_modular proxy list
 │                        │                             │
 │        ┌───────────────┴───────────────┐             │
 │        ▼                               ▼             │
-│  Origin Proxy                   Standard Proxy      │
-│  (custom adapter)               (requests proxies)  │
+│  Squid Proxy                   Standard Proxy      │
+│  (requests proxies)            (requests proxies)  │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -376,16 +363,15 @@ $ python -m src.cli.cli_modular proxy list
 
 | Variable | Values | Description |
 |----------|--------|-------------|
-| `PROXY_PROVIDER` | origin, direct, standard, socks5, scraperapi, brightdata, smartproxy | Active proxy provider |
+| `PROXY_PROVIDER` | squid, direct, standard, socks5, scraper_api, brightdata, smartproxy | Active proxy provider |
 
-### Origin Proxy (Current Default)
+### Squid Proxy (Current Default)
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `ORIGIN_PROXY_URL` | `http://proxy.kiesow.net:23432` | Proxy server URL |
-| `PROXY_USERNAME` | `user` | Authentication username |
-| `PROXY_PASSWORD` | `pass` | Authentication password |
-| `USE_ORIGIN_PROXY` | `true` | Enable/disable origin proxy |
+| `SQUID_PROXY_URL` | `http://squid.proxy.net:3128` | Proxy server URL |
+| `SQUID_PROXY_USERNAME` | `user` | Authentication username (optional) |
+| `SQUID_PROXY_PASSWORD` | `pass` | Authentication password (optional) |
 
 ### Standard HTTP Proxy
 
@@ -500,8 +486,8 @@ kubectl apply -f k8s/processor-deployment.yaml
 # Switch to BrightData
 kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=brightdata
 
-# Switch back to origin
-kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=origin
+# Switch back to Squid
+kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=squid
 ```
 
 ---

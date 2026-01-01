@@ -1,6 +1,6 @@
 """Tests for Squid-only proxy configuration.
 
-Tests the modified proxy system that routes ALL proxy traffic through Squid instead of Decodo/Origin.
+Ensures every proxy code path now routes exclusively through the Squid proxy.
 """
 
 import os
@@ -32,16 +32,16 @@ class TestSquidOnlyProxySystem:
     def test_squid_without_env_var(self, monkeypatch):
         """Test behavior when SQUID_PROXY_URL is not set."""
         # Don't set SQUID_PROXY_URL
-        monkeypatch.setenv("PROXY_PROVIDER", "origin")
+        monkeypatch.setenv("PROXY_PROVIDER", "direct")
 
         extractor = ContentExtractor()
 
-        # Should still route origin proxy traffic to Squid (default URL)
+        # Should still route proxy traffic to Squid (default URL)
         assert "t9880447.eero.online:3128" in str(extractor.session.proxies)
 
     @patch("requests.get")
     def test_unblock_proxy_uses_squid(self, mock_get, squid_env):
-        """Test that unblock proxy method uses Squid instead of Decodo."""
+        """Test that unblock proxy method always uses Squid."""
         # Mock successful Squid response (must be > 1000 chars)
         mock_response = Mock()
         mock_response.status_code = 200
@@ -64,22 +64,6 @@ class TestSquidOnlyProxySystem:
         # Verify result indicates Squid method
         assert result["method"] == "squid_proxy"
 
-    @patch("requests.get")
-    def test_origin_proxy_routes_to_squid(self, mock_get, squid_env, monkeypatch):
-        """Test that Origin proxy traffic is routed to Squid."""
-        monkeypatch.setenv("USE_ORIGIN_PROXY", "true")
-
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.text = "<html><body>Test</body></html>"
-        mock_get.return_value = mock_response
-
-        extractor = ContentExtractor()
-
-        # Verify session proxies route to Squid even when origin is enabled
-        assert extractor.session.proxies["http"] == "http://t9880447.eero.online:3128"
-        assert extractor.session.proxies["https"] == "http://t9880447.eero.online:3128"
-
     def test_domain_sessions_use_squid(self, squid_env):
         """Test that domain-specific sessions also route through Squid."""
         extractor = ContentExtractor()
@@ -92,9 +76,9 @@ class TestSquidOnlyProxySystem:
         assert session.proxies["https"] == "http://t9880447.eero.online:3128"
 
     def test_no_decodo_code_paths_active(self, squid_env):
-        """Test that no Decodo-specific code paths are triggered."""
+        """Test that no legacy Decodo code paths are triggered."""
         with patch("src.crawler.proxy_config.os.getenv") as mock_getenv:
-            # Mock environment to simulate Decodo credentials present
+            # Mock environment to simulate legacy Decodo credentials present
             def side_effect(key, default=None):
                 if key == "SQUID_PROXY_URL":
                     return "http://t9880447.eero.online:3128"
@@ -104,14 +88,14 @@ class TestSquidOnlyProxySystem:
                     "UNBLOCK_PROXY_USER",
                     "UNBLOCK_PROXY_PASS",
                 ]:
-                    return "dummy_value"  # Decodo creds present but should be ignored
+                    return "dummy_value"  # Legacy creds present but should be ignored
                 return default
 
             mock_getenv.side_effect = side_effect
 
             extractor = ContentExtractor()
 
-            # Despite Decodo creds being present, should still use SQUID provider
+            # Despite legacy creds being present, should still use SQUID provider
             assert extractor.proxy_manager.active_provider == ProxyProvider.SQUID
 
     @patch("requests.get")

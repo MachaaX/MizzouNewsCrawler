@@ -27,8 +27,7 @@ from dateutil import parser as dateparser
 from src.utils.bot_sensitivity_manager import BotSensitivityManager
 from src.utils.comprehensive_telemetry import ExtractionMetrics
 
-from .origin_proxy import enable_origin_proxy
-from .proxy_config import get_proxy_manager
+from .proxy_config import ProxyProvider, get_proxy_manager
 from .utils import mask_proxy_url
 
 UNBLOCK_MIN_HTML_BYTES = 3000
@@ -748,12 +747,14 @@ class ContentExtractor:
         self.proxy_manager = get_proxy_manager()
 
         # MODIFIED: Override to SQUID provider when using Squid proxy
-        squid_proxy_url = os.getenv("SQUID_PROXY_URL")
-        if squid_proxy_url:
-            # Force provider to SQUID for semantic correctness
-            from .proxy_config import ProxyProvider
-
-            self.proxy_manager._active_provider = ProxyProvider.SQUID
+        squid_proxy_url = os.getenv(
+            "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+        )
+        if (
+            squid_proxy_url
+            and self.proxy_manager.active_provider != ProxyProvider.SQUID
+        ):
+            self.proxy_manager.switch_provider(ProxyProvider.SQUID)
             logger.info(
                 f"🔀 Proxy provider overridden to SQUID (using {squid_proxy_url})"
             )
@@ -819,35 +820,28 @@ class ContentExtractor:
 
         self.session.headers.update(headers)
 
-        # Configure proxy based on active provider
         active_provider = self.proxy_manager.active_provider
+        squid_proxy_url = os.getenv(
+            "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+        )
 
-        # MODIFIED: Disable Origin proxy - route ALL traffic through Squid
-        # Check if we should use origin proxy (backward compatibility)
-        use_origin = os.getenv("USE_ORIGIN_PROXY", "").lower() in ("1", "true", "yes")
-
-        if active_provider.value == "origin" or use_origin:
-            # DISABLED: Origin proxy - using Squid instead
-            logger.info("🔀 Origin proxy disabled - routing through Squid instead")
-            squid_proxy_url = os.getenv(
-                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
-            )
-            squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
-            self.session.proxies.update(squid_proxies)
-
-        elif active_provider.value != "direct":
-            # MODIFIED: Route all proxy traffic through Squid instead of Decodo
-            squid_proxy_url = os.getenv(
-                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
-            )
+        if active_provider == ProxyProvider.SQUID:
             squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
             self.session.proxies.update(squid_proxies)
             logger.info(
                 f"🔀 Squid proxy enabled for HTTP extraction: {squid_proxy_url}"
             )
-        else:
-            # Direct connection (no proxy)
+        elif active_provider == ProxyProvider.DIRECT:
             logger.info("🔀 Direct connection (no proxy)")
+        else:
+            proxies = self.proxy_manager.get_requests_proxies()
+            if proxies:
+                self.session.proxies.update(proxies)
+                logger.info(
+                    f"🔀 {active_provider.value} proxy enabled for HTTP extraction"
+                )
+            else:
+                logger.info("🔀 Direct connection (no proxy)")
 
         logger.debug(
             f"Updated session headers with UA: {self.current_user_agent[:50]}..."
@@ -933,30 +927,17 @@ class ContentExtractor:
             # Configure proxy based on active provider
             # IMPORTANT: Rotate proxy when rotating UA to avoid (same IP + different UA)
             active_provider = self.proxy_manager.active_provider
-            use_origin = os.getenv("USE_ORIGIN_PROXY", "").lower() in (
-                "1",
-                "true",
-                "yes",
+            squid_proxy_url = os.getenv(
+                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
             )
 
-            if active_provider.value == "origin" or use_origin:
-                # DISABLED: Origin proxy - using Squid instead
-                logger.info(
-                    f"🔀 Origin proxy disabled for {domain} - routing through Squid instead"
-                )
-                squid_proxy_url = os.getenv(
-                    "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
-                )
+            if active_provider == ProxyProvider.SQUID:
                 squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
                 new_session.proxies.update(squid_proxies)
-
-            elif active_provider.value != "direct":
-                # MODIFIED: Route domain sessions through Squid instead of Decodo
-                squid_proxy_url = os.getenv(
-                    "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
-                )
-                squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
-                new_session.proxies.update(squid_proxies)
+            elif active_provider != ProxyProvider.DIRECT:
+                proxies = self.proxy_manager.get_requests_proxies()
+                if proxies:
+                    new_session.proxies.update(proxies)
 
             # Assign sticky proxy per domain when pool provided (legacy)
             proxy = self._choose_proxy_for_domain(domain)
@@ -2694,7 +2675,6 @@ class ContentExtractor:
 
             warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
-            # MODIFIED: Use Squid proxy instead of Decodo unblock proxy
             # Route ALL unblock traffic through residential Squid proxy
             squid_proxy_url = os.getenv(
                 "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
@@ -2705,7 +2685,7 @@ class ContentExtractor:
             # Use Squid proxy directly (no authentication needed for this Squid setup)
             proxy_url = squid_proxy_url
 
-            # Use standard browser headers for Squid proxy (no special Decodo headers needed)
+            # Use standard browser headers for Squid proxy
             user_agent_pool = [
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",

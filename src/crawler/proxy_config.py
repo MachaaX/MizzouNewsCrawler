@@ -25,9 +25,6 @@ logger = logging.getLogger(__name__)
 class ProxyProvider(Enum):
     """Available proxy providers."""
 
-    # Origin-style proxy (current default)
-    ORIGIN = "origin"
-
     # Direct connection (no proxy)
     DIRECT = "direct"
 
@@ -46,10 +43,7 @@ class ProxyProvider(Enum):
     # BrightData (Luminati) proxy
     BRIGHTDATA = "brightdata"
 
-    # Decodo ISP proxy
-    DECODO = "decodo"
-
-    # Squid residential proxy
+    # Squid residential proxy (default)
     SQUID = "squid"
 
     # Smartproxy
@@ -114,19 +108,20 @@ class ProxyManager:
     def _load_configurations(self):
         """Load all proxy configurations from environment."""
 
-        # Origin proxy (current default)
-        self.configs[ProxyProvider.ORIGIN] = ProxyConfig(
-            provider=ProxyProvider.ORIGIN,
-            enabled=True,  # Always available
-            url=os.getenv("ORIGIN_PROXY_URL", "http://proxy.kiesow.net:23432"),
-            username=os.getenv("PROXY_USERNAME"),
-            password=os.getenv("PROXY_PASSWORD"),
-        )
-
         # Direct connection (no proxy)
         self.configs[ProxyProvider.DIRECT] = ProxyConfig(
             provider=ProxyProvider.DIRECT,
             enabled=True,  # Always available
+        )
+
+        # Squid residential proxy (default provider)
+        squid_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
+        self.configs[ProxyProvider.SQUID] = ProxyConfig(
+            provider=ProxyProvider.SQUID,
+            enabled=bool(squid_url),
+            url=squid_url,
+            username=os.getenv("SQUID_PROXY_USERNAME"),
+            password=os.getenv("SQUID_PROXY_PASSWORD"),
         )
 
         # Standard HTTP proxy
@@ -190,138 +185,16 @@ class ProxyManager:
                 password=os.getenv("SMARTPROXY_PASSWORD"),
             )
 
-        # Decodo ISP proxy with port-based IP rotation
-        # Prefer to read Decodo credentials from GCP Secret Manager
-        # If a secret is not provided, fall back to explicit environment
-        # variables. IMPORTANT: do NOT embed credentials in source code.
-        decodo_secret_name = os.getenv("DECODO_SECRET_NAME")
-        decodo_creds = None
-
-        if decodo_secret_name:
-            # Try to fetch secret from GCP Secret Manager. This import is
-            # optional to avoid a hard dependency for environments that do
-            # not need GCP integration.
-            try:
-                from google.cloud import secretmanager  # type: ignore
-
-                client = secretmanager.SecretManagerServiceClient()
-                # Secret resource name should be either the secret id or the
-                # full resource path projects/*/secrets/*/versions/latest
-                name = decodo_secret_name
-                # If only a short id provided, try to build full path from
-                # GOOGLE_CLOUD_PROJECT env var
-                if not name.startswith("projects/"):
-                    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-                    if project:
-                        name = f"projects/{project}/secrets/{decodo_secret_name}/versions/latest"
-
-                response = client.access_secret_version(request={"name": name})
-                payload = response.payload.data.decode("UTF-8")
-                # Expect the secret payload to be either a JSON object with
-                # keys username/password/host/country or a plain FULL_PROXY_URL
-                import json
-
-                try:
-                    decodo_creds = json.loads(payload)
-                except Exception:
-                    # Not JSON — treat the payload as the full proxy URL
-                    decodo_creds = {"full_proxy_url": payload}
-            except Exception as e:  # pragma: no cover - best-effort runtime
-                logger.warning(
-                    "Could not read Decodo secret from Secret Manager: %s", e
-                )
-
-        # If secret manager not used or failed, fall back to environment vars.
-        if not decodo_creds:
-            env_username = os.getenv("DECODO_USERNAME")
-            env_password = os.getenv("DECODO_PASSWORD")
-            env_host = os.getenv("DECODO_HOST", "isp.decodo.com")
-            env_country = os.getenv("DECODO_COUNTRY", "us")
-            if env_username and env_password:
-                decodo_creds = {
-                    "username": env_username,
-                    "password": env_password,
-                    "host": env_host,
-                    "country": env_country,
-                }
-
-        # If we still don't have credentials, mark Decodo disabled to avoid
-        # falling back to insecure defaults embedded in source.
-        if not decodo_creds:
-            self.configs[ProxyProvider.DECODO] = ProxyConfig(
-                provider=ProxyProvider.DECODO,
-                enabled=False,
-            )
-        else:
-            # Determine whether the secret provided a full proxy URL or parts
-            full_url = (
-                decodo_creds.get("full_proxy_url")
-                if isinstance(decodo_creds, dict)
-                else None
-            )
-            use_port_rotation = os.getenv("DECODO_ROTATE_IP", "true").lower() == "true"
-
-            if use_port_rotation:
-                # We will provide a template URL; actual rotating port is chosen
-                # per-request by get_rotating_decodo_url(). Store host/creds.
-                decodo_port = None
-            else:
-                decodo_port = os.getenv("DECODO_PORT", "10000")
-
-            if full_url:
-                decodo_url = full_url
-                decodo_host = decodo_creds.get("host") or os.getenv(
-                    "DECODO_HOST", "isp.decodo.com"
-                )
-                decodo_country = decodo_creds.get("country") or os.getenv(
-                    "DECODO_COUNTRY", "us"
-                )
-                username = None
-                password = None
-            else:
-                username = decodo_creds.get("username")
-                password = decodo_creds.get("password")
-                decodo_host = decodo_creds.get("host") or os.getenv(
-                    "DECODO_HOST", "isp.decodo.com"
-                )
-                decodo_country = decodo_creds.get("country") or os.getenv(
-                    "DECODO_COUNTRY", "us"
-                )
-
-                if decodo_port:
-                    decodo_url = (
-                        f"http://{username}:{password}@{decodo_host}:{decodo_port}"
-                    )
-                else:
-                    # For rotating mode we keep a representative URL (port TBD)
-                    decodo_url = f"http://{username}:{password}@{decodo_host}"
-
-            self.configs[ProxyProvider.DECODO] = ProxyConfig(
-                provider=ProxyProvider.DECODO,
-                enabled=True,
-                url=decodo_url,
-                username=username,
-                password=password,
-                options={
-                    "country": decodo_country,
-                    "host": decodo_host,
-                    "port": decodo_port,
-                    "rotate_ip": use_port_rotation,
-                    "port_range": "10001-10010" if use_port_rotation else None,
-                },
-            )
-
     def _get_active_provider(self) -> ProxyProvider:
         """Determine active provider from PROXY_PROVIDER env var."""
-        provider_name = os.getenv("PROXY_PROVIDER", "origin").lower()
+        provider_name = os.getenv("PROXY_PROVIDER", "squid").lower()
 
         # Map common aliases
         aliases = {
             "none": ProxyProvider.DIRECT,
             "off": ProxyProvider.DIRECT,
             "disabled": ProxyProvider.DIRECT,
-            "origin": ProxyProvider.ORIGIN,
-            "default": ProxyProvider.ORIGIN,
+            "default": ProxyProvider.SQUID,
             "standard": ProxyProvider.STANDARD,
             "http": ProxyProvider.STANDARD,
             "https": ProxyProvider.STANDARD,
@@ -332,7 +205,7 @@ class ProxyManager:
             "brightdata": ProxyProvider.BRIGHTDATA,
             "luminati": ProxyProvider.BRIGHTDATA,
             "smartproxy": ProxyProvider.SMARTPROXY,
-            "decodo": ProxyProvider.DECODO,
+            "squid": ProxyProvider.SQUID,
         }
 
         provider = aliases.get(provider_name)
@@ -341,16 +214,23 @@ class ProxyManager:
                 provider = ProxyProvider(provider_name)
             except ValueError:
                 logger.warning(
-                    f"Unknown proxy provider '{provider_name}', falling back to ORIGIN"
+                    f"Unknown proxy provider '{provider_name}', falling back to SQUID"
                 )
-                provider = ProxyProvider.ORIGIN
+                provider = ProxyProvider.SQUID
 
         # Verify provider is available
         if provider not in self.configs or not self.configs[provider].enabled:
-            logger.warning(
-                f"Provider {provider.value} not configured, falling back to ORIGIN"
+            fallback_provider = (
+                ProxyProvider.SQUID
+                if self.configs.get(ProxyProvider.SQUID)
+                and self.configs[ProxyProvider.SQUID].enabled
+                else ProxyProvider.DIRECT
             )
-            provider = ProxyProvider.ORIGIN
+            logger.warning(
+                f"Provider {provider.value if provider else provider_name} not configured, "
+                f"falling back to {fallback_provider.value}"
+            )
+            provider = fallback_provider
 
         logger.info(f"🔀 Active proxy provider: {provider.value}")
         return provider
@@ -416,31 +296,17 @@ class ProxyManager:
             self.configs[provider].failure_count += 1
 
     def get_requests_proxies(self) -> Optional[dict]:
-        """
-        Get proxy configuration in requests library format.
-        For Decodo with IP rotation, returns URL with rotating port.
+        """Return proxy configuration formatted for the requests library.
 
-        Returns:
-            dict: Proxy config for requests library, or None for ORIGIN/DIRECT
+        For Squid (the default provider) this returns the configured HTTP(S)
+        proxy mapping with credentials injected when provided. Direct mode
+        returns ``None`` so callers fall back to raw network access.
         """
         config = self.get_active_config()
-
-        # Origin proxy uses custom adapter, not requests proxies
-        if config.provider == ProxyProvider.ORIGIN:
-            return None
 
         # Direct connection uses no proxy
         if config.provider == ProxyProvider.DIRECT:
             return None
-
-        # Decodo with IP rotation - use rotating port
-        if config.provider == ProxyProvider.DECODO:
-            rotating_url = self.get_rotating_decodo_url()
-            if rotating_url:
-                return {
-                    "http": rotating_url,
-                    "https": rotating_url,
-                }
 
         # Build proxy URL with auth for other providers
         if config.url:
@@ -461,76 +327,6 @@ class ProxyManager:
                 "https": proxy_url,
             }
 
-        return None
-
-    def get_rotating_decodo_url(self) -> Optional[str]:
-        """
-        Get Decodo proxy URL with rotating port (10001-10010) for IP rotation.
-        Each call returns a different port from the range.
-
-        Returns:
-            str: Proxy URL with rotated port, or None if not using Decodo
-        """
-        config = self.get_active_config()
-
-        if config.provider != ProxyProvider.DECODO:
-            return None
-
-        # Check if rotation is enabled
-        if not config.options or not config.options.get("rotate_ip", False):
-            return config.url
-
-        # Get rotation parameters
-        import random
-        from urllib.parse import urlparse
-
-        port = random.randint(10001, 10010)
-
-        # Prefer credentials stored on the config instance (from secret manager
-        # or env fallback). If not present, try to parse them from config.url.
-        username = config.username
-        password = config.password
-        host = config.options.get("host") if config.options else None
-
-        if not host:
-            # Try to glean host from the configured URL
-            if config.url:
-                try:
-                    parsed = urlparse(config.url)
-                    host = parsed.hostname
-                except Exception:
-                    host = None
-
-        if not username or not password:
-            # Try to parse username/password from the URL if available
-            if config.url:
-                try:
-                    parsed = urlparse(config.url)
-                    username = username or (parsed.username or None)
-                    password = password or (parsed.password or None)
-                except Exception:
-                    pass
-
-        if not host:
-            host = "isp.decodo.com"
-
-        if not username or not password:
-            # Credentials missing — cannot build rotating URL
-            logger.warning(
-                "Decodo rotation requested but credentials are missing; returning None"
-            )
-            return None
-
-        return f"https://{username}:{password}@{host}:{port}"
-
-    def should_use_origin_proxy(self) -> bool:
-        """Check if origin proxy should be enabled."""
-        return self._active_provider == ProxyProvider.ORIGIN
-
-    def get_origin_proxy_url(self) -> Optional[str]:
-        """Get origin proxy URL if active."""
-        if self._active_provider == ProxyProvider.ORIGIN:
-            return self.configs[ProxyProvider.ORIGIN].url
         return None
 
 

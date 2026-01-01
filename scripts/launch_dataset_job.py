@@ -192,9 +192,6 @@ def create_job_manifest(
                                 "--batches",
                                 str(batches),
                             ],
-                            "envFrom": [
-                                {"secretRef": {"name": "origin-proxy-credentials"}}
-                            ],
                             "env": [
                                 # Database
                                 {
@@ -240,14 +237,44 @@ def create_job_manifest(
                                     "value": "mizzou-news-crawler:us-central1:mizzou-db-prod",
                                 },
                                 # Proxy
-                                {"name": "PROXY_PROVIDER", "value": "decodo"},
-                                {"name": "USE_ORIGIN_PROXY", "value": "true"},
+                                {"name": "PROXY_PROVIDER", "value": "squid"},
+                                {
+                                    "name": "SQUID_PROXY_URL",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": "squid-proxy-credentials",
+                                            "key": "squid-proxy-url",
+                                            "optional": True,
+                                        }
+                                    },
+                                },
+                                {
+                                    "name": "SQUID_PROXY_USERNAME",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": "squid-proxy-credentials",
+                                            "key": "username",
+                                            "optional": True,
+                                        }
+                                    },
+                                },
+                                {
+                                    "name": "SQUID_PROXY_PASSWORD",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": "squid-proxy-credentials",
+                                            "key": "password",
+                                            "optional": True,
+                                        }
+                                    },
+                                },
                                 {
                                     "name": "SELENIUM_PROXY",
                                     "valueFrom": {
                                         "secretKeyRef": {
-                                            "name": "origin-proxy-credentials",
+                                            "name": "squid-proxy-credentials",
                                             "key": "selenium-proxy-url",
+                                            "optional": True,
                                         }
                                     },
                                 },

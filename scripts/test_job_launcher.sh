@@ -47,7 +47,7 @@ required_vars=(
     "USE_CLOUD_SQL_CONNECTOR"
     "CLOUD_SQL_INSTANCE"
     "PROXY_PROVIDER"
-    "USE_ORIGIN_PROXY"
+    "SQUID_PROXY_URL"
 )
 
 all_vars_present=true

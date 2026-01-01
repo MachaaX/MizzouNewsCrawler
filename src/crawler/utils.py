@@ -14,8 +14,8 @@ def mask_proxy_url(proxy: str | None) -> str | None:
     """Return a proxy URL with any password redacted.
 
     Examples:
-        https://user:pass@unblock.decodo.com:60000 -> https://user:***@unblock.decodo.com:60000
-        https://unblock.decodo.com:60000 -> https://unblock.decodo.com:60000
+        https://user:pass@squid.proxy.net:3128 -> https://user:***@squid.proxy.net:3128
+        https://squid.proxy.net:3128 -> https://squid.proxy.net:3128
 
     Returns None if proxy is None or empty.
     """

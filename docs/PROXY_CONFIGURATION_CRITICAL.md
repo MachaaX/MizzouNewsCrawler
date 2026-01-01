@@ -74,7 +74,7 @@ Only needed if you want to override defaults or use different provider:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: origin-proxy-credentials
+  name: squid-proxy-credentials
   namespace: production
 type: Opaque
 stringData:
@@ -102,19 +102,19 @@ env:
 - name: SELENIUM_PROXY
   valueFrom:
     secretKeyRef:
-      name: origin-proxy-credentials
+      name: squid-proxy-credentials
       key: selenium-proxy-url
 
 # Optional: Override Decodo credentials (usually not needed)
 # - name: DECODO_USERNAME
 #   valueFrom:
 #     secretKeyRef:
-#       name: origin-proxy-credentials
+#       name: squid-proxy-credentials
 #       key: decodo-username
 # - name: DECODO_PASSWORD
 #   valueFrom:
 #     secretKeyRef:
-#       name: origin-proxy-credentials
+#       name: squid-proxy-credentials
 #       key: decodo-password
 ```
 
@@ -123,217 +123,258 @@ env:
 ```yaml
 # ❌ NEVER DO THIS - Bypasses proxy switcher
 - name: ORIGIN_PROXY_URL
-  value: "http://proxy.kiesow.net:23432"
+  # CRITICAL: Proxy Configuration Rules
 
-# ❌ NEVER DO THIS - Hardcoded credentials
-- name: ORIGIN_PROXY_URL
-  value: "http://user:pass@proxy.example.com:8080"
+  ## ⚠️ NEVER HARDCODE PROXY URLS IN KUBERNETES DEPLOYMENTS
 
-# ❌ NEVER DO THIS - Overrides proxy config defaults
-- name: ORIGIN_PROXY_URL
-  valueFrom:
-    secretKeyRef:
-      name: some-secret
-      key: proxy-url
-```
+  ### The Problem (What Happened)
 
-## Switching Proxy Providers
+  The `k8s/processor-deployment.yaml` file once contained this:
 
-### Quick Switch (No Rebuild)
+  ```yaml
+  # ❌ WRONG - Hardcoded proxy URL bypasses proxy switcher
+  - name: SQUID_PROXY_URL
+    value: "http://proxy.kiesow.net:23432"
+  ```
 
-```bash
-# Switch to Decodo
-kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=decodo
+  This caused:
+  - **407 Proxy Authentication Required** errors when credentials rotated
+  - **Bypassed the proxy switcher** (could not fail over to direct/backup)
+  - Secret drift between environments (prod vs lab)
+  - Hours wasted debugging why Squid config diverged from expectations
 
-# Switch to direct (no proxy)
-kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=direct
+  ### The Solution (What We Fixed)
 
-# Verify
-kubectl get deployment/mizzou-processor -n production -o yaml | grep PROXY_PROVIDER
-```
+  ```yaml
+  # ✅ CORRECT - Use PROXY_PROVIDER + secrets to manage proxies
+  - name: PROXY_PROVIDER
+    value: "squid"
+  - name: SQUID_PROXY_URL
+    valueFrom:
+      secretKeyRef:
+        name: squid-proxy-credentials
+        key: url
+  - name: SQUID_PROXY_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: squid-proxy-credentials
+        key: username
+  - name: SQUID_PROXY_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: squid-proxy-credentials
+        key: password
+  ```
 
-### Permanent Change (In Code)
+  The proxy switcher in `src/crawler/proxy_config.py` now:
+  - Loads Squid credentials from environment variables/secrets
+  - Constructs the correct authenticated proxy URL
+  - Handles provider selection logic (squid, direct, standard, socks5...)
+  - Allows instant switching without editing manifests
 
-Edit `k8s/processor-deployment.yaml`:
+  Legacy Origin/Decodo adapters were removed—do **not** reintroduce them.
 
-```yaml
-- name: PROXY_PROVIDER
-  value: "decodo"  # Change this value
-```
+  ## How Proxy Selection Works
 
-Then commit and deploy:
+  ### 1. Environment Variable: PROXY_PROVIDER
 
-```bash
-git add k8s/processor-deployment.yaml
-git commit -m "chore: Switch to <provider> proxy"
-git push
-gcloud builds triggers run build-processor-manual --branch=<branch>
-```
+  Controls which proxy provider to use:
 
-## Verification
+  ```bash
+  # Squid residential proxy (default, recommended)
+  PROXY_PROVIDER=squid
 
-### Check Active Proxy in Logs
+  # Direct connection (no proxy)
+  PROXY_PROVIDER=direct
 
-```bash
-kubectl logs -n production deployment/mizzou-processor --tail=20 | grep -i proxy
-```
+  # Alternative providers (optional)
+  PROXY_PROVIDER=standard        # STANDARD_PROXY_URL / USERNAME / PASSWORD
+  PROXY_PROVIDER=socks5          # SOCKS5_* env vars
+  PROXY_PROVIDER=brightdata      # BRIGHTDATA_* env vars
+  PROXY_PROVIDER=scraper_api     # SCRAPERAPI_* env vars
+  PROXY_PROVIDER=smartproxy      # SMARTPROXY_* env vars
+  ```
 
-Expected output:
-```
-🔀 Proxy manager initialized with provider: decodo
-🔀 Standard proxy enabled: decodo (['http', 'https'])
-🔀 Proxying GET example.com via decodo proxy
-```
+  ### 2. Squid Credentials
 
-### Check Environment Variables
+  From `src/crawler/proxy_config.py`:
 
-```bash
-kubectl exec -n production deployment/mizzou-processor -- env | grep PROXY
-```
+  ```python
+  squid_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
+  self.configs[ProxyProvider.SQUID] = ProxyConfig(
+      provider=ProxyProvider.SQUID,
+      enabled=bool(squid_url),
+      url=squid_url,
+      username=os.getenv("SQUID_PROXY_USERNAME"),
+      password=os.getenv("SQUID_PROXY_PASSWORD"),
+  )
+  ```
 
-Expected output:
-```
-PROXY_PROVIDER=decodo
-USE_ORIGIN_PROXY=true
-```
+  Set the URL + optional credentials via environment variables or Kubernetes secrets. If your Squid tier is IP-allowlisted you can omit username/password.
 
-Should **NOT** see:
-```
-ORIGIN_PROXY_URL=http://proxy.kiesow.net:23432  # ❌ BAD
-```
+  ### 3. Kubernetes Secrets
 
-## Troubleshooting
+  Use the shared `squid-proxy-credentials` secret everywhere:
 
-### Issue: Still Using Wrong Proxy
+  ```yaml
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: squid-proxy-credentials
+    namespace: production
+  type: Opaque
+  stringData:
+    url: "http://squid.proxy.net:3128"
+    username: "my-user"      # optional
+    password: "my-password"  # optional
+  ```
 
-**Symptoms:**
-- Logs show `proxy.kiesow.net:23432`
-- Getting 407 auth errors
-- Wrong proxy provider in logs
+  Copy this secret between namespaces via `scripts/setup-lab-namespace.sh` (already implemented).
 
-**Solution:**
-```bash
-# 1. Check deployment YAML
-kubectl get deployment/mizzou-processor -n production -o yaml | grep -A2 PROXY
+  ## Correct Kubernetes Deployment Pattern
 
-# 2. If ORIGIN_PROXY_URL exists, it's wrong - rebuild
-git pull
-# Verify k8s/processor-deployment.yaml has PROXY_PROVIDER, not ORIGIN_PROXY_URL
-gcloud builds triggers run build-processor-manual --branch=<branch>
+  ### processor-deployment.yaml
 
-# 3. Wait for new pod
-kubectl rollout status deployment/mizzou-processor -n production
-```
+  ```yaml
+  env:
+    # ✅ Use proxy switcher - DO NOT hardcode URLs/passwords
+    - name: PROXY_PROVIDER
+      value: "squid"
+    - name: SQUID_PROXY_URL
+      valueFrom:
+        secretKeyRef:
+          name: squid-proxy-credentials
+          key: url
+    - name: SQUID_PROXY_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: squid-proxy-credentials
+          key: username
+          optional: true
+    - name: SQUID_PROXY_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: squid-proxy-credentials
+          key: password
+          optional: true
 
-### Issue: Decodo Not Working
+    # Selenium proxy (separate system)
+    - name: SELENIUM_PROXY
+      valueFrom:
+        secretKeyRef:
+          name: squid-proxy-credentials
+          key: selenium-proxy-url
+          optional: true
+  ```
 
-**Symptoms:**
-- Connection timeouts
-- DNS errors
-- Auth failures
+  ### What NOT to Do
 
-**Debug:**
-```bash
-# Check proxy config is loading
-kubectl logs -n production deployment/mizzou-processor --tail=100 | grep -i decodo
+  ```yaml
+  # ❌ NEVER DO THIS - Hardcoded URL/password
+  - name: SQUID_PROXY_URL
+    value: "http://user:pass@proxy.example.com:8080"
 
-# Check environment
-kubectl exec -n production deployment/mizzou-processor -- python3 -c "
-from src.crawler.proxy_config import ProxyManager
-pm = ProxyManager()
-print(f'Active: {pm.active_provider}')
-print(f'Decodo config: {pm.configs.get(pm.active_provider)}')
-"
-```
+  # ❌ NEVER DO THIS - Bring back removed env vars
+  - name: ORIGIN_PROXY_URL
+    value: "http://proxy.kiesow.net:23432"
 
-## Adding New Proxy Provider
+  # ❌ NEVER DO THIS - Reintroduce USE_ORIGIN_PROXY/DECODO_* env vars
+  - name: USE_ORIGIN_PROXY
+    value: "true"
+  ```
 
-### 1. Add to proxy_config.py
+  ## Switching Proxy Providers
 
-```python
-class ProxyProvider(Enum):
-    # ... existing providers ...
-    MY_NEW_PROXY = "my_new_proxy"
+  ### Quick Switch (No Rebuild)
 
-# In _load_configurations():
-my_proxy_url = os.getenv("MY_PROXY_URL", "http://default.proxy.com:8080")
-self.configs[ProxyProvider.MY_NEW_PROXY] = ProxyConfig(
-    provider=ProxyProvider.MY_NEW_PROXY,
-    enabled=True,
-    url=my_proxy_url,
-    username=os.getenv("MY_PROXY_USERNAME"),
-    password=os.getenv("MY_PROXY_PASSWORD"),
-)
-```
+  ```bash
+  # Switch to Squid (recommended/default)
+  kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=squid
 
-### 2. Use in Deployment
+  # Temporary direct mode (troubleshooting only)
+  kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=direct
 
-```yaml
-- name: PROXY_PROVIDER
-  value: "my_new_proxy"
-```
+  # Verify current setting
+  kubectl get deployment/mizzou-processor -n production -o yaml | grep PROXY_PROVIDER
+  ```
 
-### 3. Test Locally
+  ### Permanent Change (In Code)
 
-```bash
-export PROXY_PROVIDER=my_new_proxy
-export MY_PROXY_URL=http://test.proxy.com:8080
-export MY_PROXY_USERNAME=testuser
-export MY_PROXY_PASSWORD=testpass
-python3 test_proxy.py
-```
+  Edit `k8s/processor-deployment.yaml` and update the `PROXY_PROVIDER` value (and accompanying env vars if using a different provider). Then rebuild/deploy as usual:
 
-## Deployment Checklist
+  ```bash
+  git add k8s/processor-deployment.yaml
+  git commit -m "chore: switch processor proxy provider"
+  gcloud builds triggers run build-processor-manual --branch=<branch>
+  ```
 
-Before deploying processor:
+  ## Verification
 
-- [ ] `k8s/processor-deployment.yaml` has `PROXY_PROVIDER` env var
-- [ ] `k8s/processor-deployment.yaml` does NOT have `ORIGIN_PROXY_URL` env var
-- [ ] `PROXY_PROVIDER` value matches desired proxy (usually "decodo")
-- [ ] Commit message mentions proxy configuration
-- [ ] After deploy, verify logs show correct proxy provider
+  ### Check Active Proxy in Logs
 
-## Emergency Rollback
+  ```bash
+  kubectl logs -n production deployment/mizzou-processor --tail=50 | grep -i squid
+  ```
 
-If new proxy breaks extraction:
+  Expected output:
+  ```
+  🔀 Proxy manager initialized with provider: squid
+  🔀 Squid proxy enabled for HTTP extraction: http://squid.proxy.net:3128
+  🔀 Proxying GET example.com via squid proxy
+  ```
 
-```bash
-# Quick switch back to working proxy
-kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=direct
+  ### Check Environment Variables
 
-# Or switch to origin (if it was working)
-kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=origin
+  ```bash
+  kubectl exec -n production deployment/mizzou-processor -- env | grep -E "PROXY_PROVIDER|SQUID"
+  ```
 
-# Wait for rollout
-kubectl rollout status deployment/mizzou-processor -n production
+  Expected output:
+  ```
+  PROXY_PROVIDER=squid
+  SQUID_PROXY_URL=http://squid.proxy.net:3128
+  SQUID_PROXY_USERNAME=...
+  SQUID_PROXY_PASSWORD=********
+  ```
 
-# Check logs
-kubectl logs -n production deployment/mizzou-processor --tail=50 | grep -i proxy
-```
+  There should be **no** `ORIGIN_PROXY_*`, `USE_ORIGIN_PROXY`, or `DECODO_*` env vars anywhere.
 
-## Related Files
+  ## Troubleshooting
 
-- `src/crawler/proxy_config.py` - Proxy manager and provider definitions
-- `src/crawler/origin_proxy.py` - Origin-style proxy implementation
-- `src/crawler/__init__.py` - HTTP session creation with proxy
-- `k8s/processor-deployment.yaml` - Kubernetes deployment config
-- `k8s/api-deployment.yaml` - API deployment config
-- `k8s/origin-sitecustomize-configmap.yaml` - Global proxy injection
+  ### Issue: Still Using Wrong Proxy
 
-## History
+  **Symptoms:**
+  - Logs mention `proxy.kiesow.net` or other unexpected hosts
+  - 407 authentication errors despite valid Squid credentials
+  - `Proxy provider` log line shows `direct` when Squid should be active
 
-- **2025-10-11**: Fixed hardcoded `ORIGIN_PROXY_URL` in processor deployment
-  - Issue: 407 errors, wrong proxy being used
-  - Solution: Removed hardcoded URL, added `PROXY_PROVIDER=decodo`
-  - Commit: 916d972
-  - Never hardcode proxy URLs again!
+  **Solution:**
+  1. Inspect deployment:
+     ```bash
+     kubectl get deployment/mizzou-processor -n production -o yaml | grep -A3 SQUID_
+     ```
+     Ensure all `valueFrom` entries point to `squid-proxy-credentials`.
+  2. Verify the secret contents (base64 decode) to ensure URL/credentials match expectations.
+  3. Confirm `PROXY_PROVIDER` is set to `squid` (not inherited from an old ConfigMap).
+  4. Restart the deployment after updating env vars to pick up new settings.
 
-- **2025-09-XX**: Added proxy switcher system
-  - Multiple provider support
-  - Easy switching via PROXY_PROVIDER
-  - Default Decodo configuration
+  ### Issue: Credential Rotation Broke Requests
 
-- **2025-08-XX**: Original origin proxy implementation
-  - Single proxy (kiesow.net)
-  - No provider abstraction
-  - Led to hardcoding issues
+  **Symptoms:**
+  - 407 errors immediately after rotating Squid credentials
+  - Logs show the old username
+
+  **Solution:**
+  - Update the `squid-proxy-credentials` secret with the new values
+  - Restart any workloads that mount/env-ref the secret (`kubectl rollout restart deployment/mizzou-processor -n production`)
+  - Re-run `python scripts/diagnose_proxy.py` to confirm connectivity
+
+  ### Issue: Need Temporary Direct Mode
+
+  ```bash
+  kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=direct
+  # (do your testing)
+  kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=squid
+  ```
+
+  Never leave the deployment in direct mode—ensure Squid is restored.

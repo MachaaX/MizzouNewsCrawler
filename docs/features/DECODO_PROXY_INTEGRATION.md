@@ -178,7 +178,7 @@ Monitor for 24 hours and compare metrics.
 kubectl set env deployment/mizzou-processor -n production PROXY_PROVIDER=decodo
 
 # Remove old origin proxy credentials (optional)
-kubectl delete secret origin-proxy-credentials -n production
+kubectl delete secret squid-proxy-credentials -n production
 ```
 
 ---
