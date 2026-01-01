@@ -282,7 +282,7 @@ class TestProxyChallengeMetrics:
             assert "challenge_page" in str(exc_info.value)
 
             # Note: Since we're mocking the request, the proxy metrics won't be set
-            # because the actual proxy detection logic isn't executed. 
+            # because the actual proxy detection logic isn't executed.
             # The test validates that challenge detection works, which is sufficient.
 
 
@@ -328,7 +328,7 @@ class TestProxyChallengePatterns:
 
             url = "https://www.fourstateshomepage.com/test"
 
-            # Primary challenge patterns should be detected 
+            # Primary challenge patterns should be detected
             if "Access to this page has been denied" in challenge_text:
                 with pytest.raises(ProxyChallengeError) as exc_info:
                     extractor._extract_with_unblock_proxy(url)

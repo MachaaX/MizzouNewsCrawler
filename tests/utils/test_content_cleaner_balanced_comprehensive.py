@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from typing import Optional
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
