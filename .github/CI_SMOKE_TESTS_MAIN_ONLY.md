@@ -40,12 +40,16 @@ origin-proxy-only:
 **After:**
 ```yaml
 origin-proxy-only:
-  name: Origin-proxy tests (smoke)
+  name: Proxy stack tests (smoke)
   runs-on: ubuntu-latest
   needs: [unit]
   # Only run smoke tests on main branch or PRs to main
   if: github.event_name == 'push' || github.base_ref == 'main' || github.ref == 'refs/heads/main'
 ```
+
+These smoke tests now execute `tests/backend/test_lifecycle.py` (Squid proxy wiring) and
+`tests/test_deployment_requirements.py` (Argo + deployment manifests) to guarantee the
+proxy stack remains enforced even though the legacy origin-proxy suite was removed.
 
 #### integration Job
 **Before:**
@@ -80,7 +84,7 @@ Even on feature branches (when not targeting `main`), these jobs will still run:
 ## What Only Runs on Main-Related Branches
 
 These heavier jobs only run on `main` or PRs to `main`:
-- 🔒 **origin-proxy-only** - Smoke tests for proxy adapter
+- 🔒 **origin-proxy-only** - Proxy stack smoke tests (Squid enforcement)
 - 🔒 **integration** - Full test suite with coverage requirements
 - 🔒 **security** - Security scans (scheduled/manual only)
 - 🔒 **stress** - Stress tests (scheduled/manual only)
@@ -117,7 +121,7 @@ gh pr create --base main
 |----------|--------------|------------|-----------------|---------------|---------|
 | lint | ✅ | ✅ | ✅ | ✅ | ✅ |
 | unit | ✅ | ✅ | ✅ | ✅ | ✅ |
-| origin-proxy-only | ✅ | ✅ | ❌ | ❌ | ✅ |
+| origin-proxy-only (proxy stack smoke) | ✅ | ✅ | ❌ | ❌ | ✅ |
 | integration | ✅ | ✅ | ❌ | ❌ | ✅ |
 | smoke-proxy-tests.yml | ✅ | ✅ | ❌ | ❌ | ✅ |
 | security | ⏰ Scheduled | ⏰ Scheduled | ❌ | ❌ | ✅ |

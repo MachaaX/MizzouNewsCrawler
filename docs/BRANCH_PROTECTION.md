@@ -96,7 +96,8 @@ The CI/CD will **block merges** if:
 
 2. Ensure all tests pass:
    ```bash
-   pytest tests/test_origin_proxy.py -v
+   pytest tests/backend/test_lifecycle.py -v
+   pytest tests/test_deployment_requirements.py -v
    pytest tests/test_sitecustomize_integration.py -v
    ```
 
