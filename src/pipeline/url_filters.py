@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlparse
 
 from storysniffer import StorySniffer
 
@@ -7,18 +8,35 @@ def check_is_article(url, discovery_method="unknown"):
     """Conservative article detection focusing on URL path structure patterns."""
     url_lower = (url or "").lower()
 
-    # if url doesnt end with '/', add '/' to normalize
-    # This removes false matching of patterns like '/feed' matching '/feeding-poultry-blog'
-    # so we now use /feed/ to check instead of /feed
-    if not url_lower.endswith('/'):
-        url_lower += '/'
+    # Smart URL normalization: normalize path portion while preserving file extensions
+    # and handling query parameters/fragments properly
+    try:
+        parsed = urlparse(url_lower)
+        path = parsed.path
+        
+        # Don't normalize URLs that end with file extensions
+        file_extensions = ('.jpg', '.png', '.gif', '.pdf', '.css', '.js', '.xml', '.jpeg', '.svg', '.json')
+        if not any(path.endswith(ext) for ext in file_extensions):
+            # Normalize path by ensuring trailing slash for directories
+            if path and not path.endswith('/'):
+                path += '/'
+        
+        # Reconstruct URL with normalized path
+        url_lower = f"{parsed.scheme}://{parsed.netloc}{path}"
+        if parsed.query:
+            url_lower += f"?{parsed.query}"
+        if parsed.fragment:
+            url_lower += f"#{parsed.fragment}"
+    except Exception:
+        # If URL parsing fails, use original URL without normalization
+        pass
     
-    # added '/' in the right end to patterns to complement normalization
-    # removed '/category/', '/tag/', '/page/' and '/sections/' from below non-article patterns to reduce false negatives and be less aggressive
-    # added '.jpeg', '.svg', '.json'
+    # Non-article URL patterns - designed to catch obvious non-article pages
+    # Removed overly aggressive patterns like /category/, /tag/, /page/ to reduce false negatives
+    # File extensions checked separately to ensure proper matching after normalization
     non_article_patterns = [
         "/search/",
-        "/author/",
+        "/author/", 
         "/rss/",
         "/feed/",
         "/sitemap/",
@@ -42,14 +60,12 @@ def check_is_article(url, discovery_method="unknown"):
         if pattern in url_lower:
             return False
 
-    # commented out below code, cuz could cause false negatives
-    # if "/category/" in url_lower or "/tag/" in url_lower or "/topics/" in url_lower:
-    #     return False
-
+    # Additional multimedia content filtering - these are typically not news articles
+    # Using consistent pattern matching: some with path segments (/video/), some without (/watch)
     if "/video/" in url_lower or "/watch/" in url_lower or "/videos/" in url_lower:
         return False
     
-    # added audio patterns
+    # Filter audio/podcast content
     if '/audio/' in url_lower or '/listen/' in url_lower or '/podcast/' in url_lower or '/podcasts/' in url_lower:
         return False
     
@@ -76,19 +92,14 @@ def check_is_article(url, discovery_method="unknown"):
     if re.search(r"/\d{3,}", url_lower):
         return True
 
-    # commented out below code, cuz newspaper4k discovered urls are no different than others
-    # if discovery_method == "newspaper4k":
-    #     path = url_lower.split("://")[-1].split("?")[0]
-    #     segments = [
-    #         seg for seg in ("/" + "/".join(path.split("/")[1:])).split("/") if seg
-    #     ]
-    #     if len(segments) >= 2 or any("-" in seg for seg in segments):
-    #         return True
-    #     return False
+    # Newspaper4k special-case logic removed: empirically, URLs discovered via newspaper4k
+    # are not different enough from other discovery methods to justify separate handling.
+    # Previous attempts at special-casing newspaper4k URLs increased false positives/negatives.
 
-    # Final fallback: try storysniffer if available
+    # Final fallback: use StorySniffer for additional article detection
+    # Note: Using .guess() method - the .is_article_url() method does not exist in StorySniffer API
     try:
         sniffer = StorySniffer()
-        return bool(sniffer.guess(url)) # is_article_url method replaced with guess method
+        return bool(sniffer.guess(url))
     except Exception:
         return False
