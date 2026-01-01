@@ -117,11 +117,11 @@ class TestSquidOnlyProxySystem:
         # Test different extraction scenarios that would use proxies
         
         # 1. Unblock proxy extraction
-        result1 = extractor._extract_with_unblock_proxy("https://example.com/unblock")
+        extractor._extract_with_unblock_proxy("https://example.com/unblock")
         
         # 2. Regular HTTP extraction with proxy
         # This would go through the session proxy setup
-        session = extractor._get_domain_session("https://example.com")
+        extractor._get_domain_session("https://example.com")
         
         # Verify all use Squid
         assert all("t9880447.eero.online:3128" in str(call) for call in mock_get.call_args_list)
@@ -181,3 +181,4 @@ class TestSquidOnlyProxySystem:
         # Should ignore all old vars and use Squid
         assert extractor.proxy_manager.active_provider == ProxyProvider.SQUID
         assert "t9880447.eero.online:3128" in str(extractor.session.proxies)
+
