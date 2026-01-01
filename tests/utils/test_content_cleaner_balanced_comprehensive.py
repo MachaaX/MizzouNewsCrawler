@@ -408,8 +408,15 @@ def test_get_article_source_context_no_results():
 
 
 def test_get_articles_for_domain_with_mocked_db():
+    """Test that _get_articles_for_domain works with mocked database."""
     cleaner = BalancedBoundaryContentCleaner(db_path=":memory:")
 
+    # Mock the database manager and session 
+    mock_db = Mock()
+    mock_session = Mock()
+    mock_db.get_session.return_value.__enter__.return_value = mock_session
+    mock_db.get_session.return_value.__exit__.return_value = None
+    
     # Create mock data
     mock_data = [
         (
@@ -429,12 +436,11 @@ def test_get_articles_for_domain_with_mocked_db():
     # Create result that properly mocks SQLAlchemy's result proxy
     mock_result = Mock()
     mock_result.fetchall.return_value = mock_data
-
-    mock_session = Mock()
     mock_session.execute.return_value = mock_result
 
-    # Pass the mocked session directly
-    articles = cleaner._get_articles_for_domain("example.com", session=mock_session)
+    # Mock _connect_to_db to return our mock database
+    with patch.object(cleaner, '_connect_to_db', return_value=mock_db):
+        articles = cleaner._get_articles_for_domain("example.com")
 
     assert len(articles) == 2
     assert articles[0]["url"] == "https://example.com/a"
