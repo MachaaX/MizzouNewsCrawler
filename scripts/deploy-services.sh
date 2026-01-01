@@ -342,28 +342,21 @@ if [ $BUILD_FAILURES -eq 0 ]; then
     if [ "$COMMIT_SHA" != "unknown" ] && [ -f "$VERSIONS_FILE" ]; then
         echo "📝 Updating versions in $VERSIONS_FILE..."
 
-        update_version() {
-            local var_name=$1
-            local new_val=$2
-            local file=$3
-            # Portable sed: create temp file, move it back
-            sed "s/export $var_name=.*/export $var_name=$new_val/" "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
-        }
-
-        # Update versions based on what was built
+        UPDATE_ARGS=()
         if should_build "processor"; then
-            update_version "PROCESSOR_TAG" "$COMMIT_SHA" "$VERSIONS_FILE"
-            echo "   Updated PROCESSOR_TAG to $COMMIT_SHA"
+            UPDATE_ARGS+=("--processor" "$COMMIT_SHA")
         fi
         
         if should_build "crawler"; then
-            update_version "CRAWLER_TAG" "$COMMIT_SHA" "$VERSIONS_FILE"
-            echo "   Updated CRAWLER_TAG to $COMMIT_SHA"
+            UPDATE_ARGS+=("--crawler" "$COMMIT_SHA")
         fi
         
         if should_build "api"; then
-            update_version "API_TAG" "$COMMIT_SHA" "$VERSIONS_FILE"
-            echo "   Updated API_TAG to $COMMIT_SHA"
+            UPDATE_ARGS+=("--api" "$COMMIT_SHA")
+        fi
+
+        if [ ${#UPDATE_ARGS[@]} -gt 0 ]; then
+            ./scripts/update-versions-env.sh "${UPDATE_ARGS[@]}"
         fi
 
         # Apply manifests

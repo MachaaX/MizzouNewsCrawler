@@ -225,11 +225,8 @@ steps:
             --zone=us-central1-a \
             --project=${PROJECT_ID}
           
-          # Get the current workflow template and update crawler images
-          kubectl get workflowtemplate news-pipeline-template -n production -o json | \
-            jq --arg sha "${SHORT_SHA}" \
-              '(.spec.templates[] | select(.name == "discovery-step" or .name == "verification-step" or .name == "extraction-step") | .container.image) |= "us-central1-docker.pkg.dev/mizzou-news-crawler/mizzou-crawler/crawler:" + $sha' | \
-            kubectl apply -f -
+          # Reuse helper script to patch workflow template images
+          bash gcp/cloudbuild/update-workflow-template.sh crawler "${SHORT_SHA}"
           
           echo "✅ Argo WorkflowTemplate updated to use crawler:${SHORT_SHA}"
           echo "   Next workflow run will use the new image"
