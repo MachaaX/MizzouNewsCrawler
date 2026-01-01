@@ -495,3 +495,54 @@ jobs:
               exit 1
             fi
           fi
+
+  update-versions-env:
+    name: Update versions.env
+    needs: [detect-changes, wait-for-builds]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      needs.detect-changes.outputs.services_to_build != 'none' &&
+      (needs.wait-for-builds.result == 'success' || needs.wait-for-builds.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare main branch
+        run: |
+          git checkout main
+          git pull --ff-only origin main
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update versions file
+        env:
+          SHORT_SHA: ${{ github.sha }}
+          PROCESSOR_CHANGED: ${{ needs.detect-changes.outputs.processor }}
+          API_CHANGED: ${{ needs.detect-changes.outputs.api }}
+          CRAWLER_CHANGED: ${{ needs.detect-changes.outputs.crawler }}
+        run: |
+          SHORT=${SHORT_SHA:0:7}
+          ARGS=()
+          if [ "$PROCESSOR_CHANGED" = "true" ]; then ARGS+=(--processor "$SHORT"); fi
+          if [ "$CRAWLER_CHANGED" = "true" ]; then ARGS+=(--crawler "$SHORT"); fi
+          if [ "$API_CHANGED" = "true" ]; then ARGS+=(--api "$SHORT"); fi
+          if [ ${#ARGS[@]} -eq 0 ]; then
+            echo "No services requested a versions update"
+            exit 0
+          fi
+          ./scripts/update-versions-env.sh "${ARGS[@]}"
+          if git diff --quiet k8s/versions.env; then
+            echo "versions.env already up to date"
+            exit 0
+          fi
+          git add k8s/versions.env
+          git commit -m "chore: update image tags (${SHORT}) [skip ci]"
+          git push origin HEAD

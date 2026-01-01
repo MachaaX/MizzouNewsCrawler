@@ -8,8 +8,9 @@ methods, publishers, and error conditions to optimize extraction strategies.
 import json
 import logging
 import time
+from collections import defaultdict
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -935,6 +936,279 @@ class ComprehensiveExtractionTelemetry:
                 }
             )
 
+        return results
+
+    @staticmethod
+    def _safe_json_loads(raw: str | None, default):
+        """Parse JSON payloads while tolerating malformed data."""
+
+        if not raw:
+            return default
+
+        try:
+            return json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return default
+
+    def _execute_with_optional_sources_join(
+        self,
+        conn,
+        base_columns: str,
+        where_clause: str,
+        params: list[Any],
+    ):
+        """Execute a query that optionally joins the sources table.
+
+        In local SQLite telemetry snapshots the sources table may not exist.
+        This helper attempts the join first and gracefully falls back to a
+        telemetry-only query when the join fails.
+        """
+
+        join_sql = " LEFT JOIN sources s ON s.host = et.host"
+        query = (
+            f"SELECT {base_columns} "
+            "FROM extraction_telemetry_v2 et"
+            f"{join_sql}"
+            f"{where_clause}"
+        )
+
+        try:
+            cursor = conn.execute(query, params)
+            return cursor, True
+        except Exception as exc:
+            message = str(exc).lower()
+            if "sources" not in message or not (
+                "no such table" in message or "does not exist" in message
+            ):
+                raise
+
+        # Retry without joining sources; caller should treat protection as unknown
+        fallback_query = (
+            f"SELECT {base_columns} "
+            "FROM extraction_telemetry_v2 et"
+            f"{where_clause}"
+        )
+        cursor = conn.execute(fallback_query, params)
+        return cursor, False
+
+    def get_unblock_proxy_outcomes(self, hours: int = 24) -> dict[str, Any]:
+        """Aggregate unblock proxy attempts by host and protection family."""
+
+        params: list[Any] = []
+        where_parts = ["et.methods_attempted IS NOT NULL"]
+
+        if hours is not None:
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            where_parts.append("et.created_at >= ?")
+            params.append(cutoff)
+        else:
+            cutoff = None
+
+        where_clause = ""
+        if where_parts:
+            where_clause = " WHERE " + " AND ".join(where_parts)
+
+        columns = (
+            "et.host, et.methods_attempted, et.method_success, et.method_errors, "
+            "et.is_success, et.created_at, s.bot_protection_type"
+        )
+
+        with self._store.connection() as conn:
+            cursor, _ = self._execute_with_optional_sources_join(
+                conn, columns, where_clause, params
+            )
+            try:
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
+        host_stats: dict[str, dict[str, Any]] = {}
+        protection_stats: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {
+                "protection_type": "unknown",
+                "attempts": 0,
+                "successes": 0,
+                "challenges": 0,
+                "failures": 0,
+            }
+        )
+
+        for row in rows:
+            (
+                host,
+                methods_json,
+                success_json,
+                errors_json,
+                _overall_success,
+                created_at,
+                protection_type,
+            ) = row
+
+            methods = self._safe_json_loads(methods_json, [])
+            if "unblock_proxy" not in methods:
+                continue
+
+            success_map = self._safe_json_loads(success_json, {})
+            errors_map = self._safe_json_loads(errors_json, {})
+            method_success = bool(success_map.get("unblock_proxy"))
+            error_text = (errors_map.get("unblock_proxy") or "").lower()
+
+            if method_success:
+                outcome = "success"
+            elif any(keyword in error_text for keyword in ("challenge", "captcha")):
+                outcome = "challenge"
+            else:
+                outcome = "failure"
+
+            host_entry = host_stats.setdefault(
+                host,
+                {
+                    "host": host,
+                    "protection_type": protection_type or "unknown",
+                    "attempts": 0,
+                    "successes": 0,
+                    "challenges": 0,
+                    "failures": 0,
+                    "last_seen": created_at,
+                },
+            )
+            host_entry["attempts"] += 1
+            if created_at and (
+                host_entry["last_seen"] is None or created_at > host_entry["last_seen"]
+            ):
+                host_entry["last_seen"] = created_at
+
+            if outcome == "success":
+                host_entry["successes"] += 1
+            elif outcome == "challenge":
+                host_entry["challenges"] += 1
+            else:
+                host_entry["failures"] += 1
+
+            protection_key = protection_type or "unknown"
+            prot_entry = protection_stats[protection_key]
+            prot_entry["protection_type"] = protection_key
+            prot_entry["attempts"] += 1
+            if outcome == "success":
+                prot_entry["successes"] += 1
+            elif outcome == "challenge":
+                prot_entry["challenges"] += 1
+            else:
+                prot_entry["failures"] += 1
+
+        host_list = sorted(
+            host_stats.values(), key=lambda item: item["attempts"], reverse=True
+        )
+        protection_list = sorted(
+            (
+                {
+                    **stats,
+                    "success_rate": (
+                        stats["successes"] / stats["attempts"]
+                        if stats["attempts"]
+                        else 0.0
+                    ),
+                }
+                for stats in protection_stats.values()
+            ),
+            key=lambda item: item["attempts"],
+            reverse=True,
+        )
+
+        return {
+            "host_stats": host_list,
+            "protection_stats": protection_list,
+            "window_start": cutoff,
+        }
+
+    def get_protection_success_stats(self, hours: int = 24) -> list[dict[str, Any]]:
+        """Return extraction success rates grouped by bot protection type."""
+
+        params: list[Any] = []
+        where_parts = []
+        if hours is not None:
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            where_parts.append("et.created_at >= ?")
+            params.append(cutoff)
+
+        where_clause = ""
+        if where_parts:
+            where_clause = " WHERE " + " AND ".join(where_parts)
+
+        columns = (
+            "et.host, et.is_success, et.methods_attempted, et.method_success, "
+            "s.bot_protection_type"
+        )
+
+        with self._store.connection() as conn:
+            cursor, _ = self._execute_with_optional_sources_join(
+                conn, columns, where_clause, params
+            )
+            try:
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
+        protection_summary: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {
+                "protection_type": "unknown",
+                "attempts": 0,
+                "successes": 0,
+                "failures": 0,
+                "unblock_attempts": 0,
+                "unblock_successes": 0,
+                "selenium_attempts": 0,
+                "selenium_successes": 0,
+            }
+        )
+
+        for row in rows:
+            host, is_success, methods_json, success_json, protection_type = row
+            protection_key = protection_type or "unknown"
+            summary = protection_summary[protection_key]
+            summary["protection_type"] = protection_key
+            summary["attempts"] += 1
+            if is_success:
+                summary["successes"] += 1
+            else:
+                summary["failures"] += 1
+
+            methods = self._safe_json_loads(methods_json, [])
+            successes = self._safe_json_loads(success_json, {})
+
+            if "unblock_proxy" in methods:
+                summary["unblock_attempts"] += 1
+                if successes.get("unblock_proxy"):
+                    summary["unblock_successes"] += 1
+
+            if "selenium" in methods:
+                summary["selenium_attempts"] += 1
+                if successes.get("selenium"):
+                    summary["selenium_successes"] += 1
+
+        results: list[dict[str, Any]] = []
+        for stats in protection_summary.values():
+            attempts = stats["attempts"]
+            unblock_attempts = stats["unblock_attempts"]
+            selenium_attempts = stats["selenium_attempts"]
+            results.append(
+                {
+                    **stats,
+                    "success_rate": stats["successes"] / attempts if attempts else 0.0,
+                    "unblock_success_rate": (
+                        stats["unblock_successes"] / unblock_attempts
+                        if unblock_attempts
+                        else 0.0
+                    ),
+                    "selenium_success_rate": (
+                        stats["selenium_successes"] / selenium_attempts
+                        if selenium_attempts
+                        else 0.0
+                    ),
+                }
+            )
+
+        results.sort(key=lambda item: item["attempts"], reverse=True)
         return results
 
     def get_method_effectiveness(

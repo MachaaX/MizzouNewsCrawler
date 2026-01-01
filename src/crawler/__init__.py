@@ -1287,8 +1287,11 @@ class ContentExtractor:
 
         from src.models.database import DatabaseManager
 
-        # Map strong bot protections to unblock method
-        if protection_type in {"perimeterx", "datadome", "akamai"}:
+        # Map strong bot protections to the appropriate extraction method
+        if protection_type == "perimeterx":
+            # PerimeterX requires full-browser execution; skip HTTP entirely
+            method = "selenium"
+        elif protection_type in {"datadome", "akamai"}:
             method = "unblock"
 
         try:
