@@ -340,7 +340,7 @@ class TestProxyChallengePatterns:
             # Challenge detection now works properly - test each pattern
             with pytest.raises(ProxyChallengeError) as exc_info:
                 extractor._extract_with_unblock_proxy(url)
-            
+
             # Verify the specific pattern was detected
             if "Access to this page has been denied" in challenge_text:
                 assert "challenge_page" in str(exc_info.value)

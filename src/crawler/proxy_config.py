@@ -48,7 +48,7 @@ class ProxyProvider(Enum):
 
     # Decodo ISP proxy
     DECODO = "decodo"
-    
+
     # Squid residential proxy
     SQUID = "squid"
 

@@ -2583,9 +2583,12 @@ class NewsDiscovery:
                             sections_data = result[0]
                             if isinstance(sections_data, str):
                                 sections_data = json.loads(sections_data)
-                            
+
                             # If discovery_method is 'manual_configuration', skip homepage
-                            if sections_data.get("discovery_method") == "manual_configuration":
+                            if (
+                                sections_data.get("discovery_method")
+                                == "manual_configuration"
+                            ):
                                 skip_homepage_use_sections_only = True
                                 logger.info(
                                     "Source %s has manual section configuration, "
@@ -2602,7 +2605,7 @@ class NewsDiscovery:
                     source_id=source_id,
                     source_meta=source_meta,
                 )
-                
+
                 if section_articles:
                     logger.info(
                         "Manual section discovery found %d articles for %s",
@@ -2624,7 +2627,7 @@ class NewsDiscovery:
                         0,
                         notes="manual section configuration returned 0 articles",
                     )
-                
+
                 return section_articles
 
             # Quick homepage sniff: try to find RSS/Atom link tags on the

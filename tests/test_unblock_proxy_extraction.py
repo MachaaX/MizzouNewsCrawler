@@ -70,8 +70,10 @@ from sqlalchemy import text
 
 # Deprecation marker for all tests in this file
 pytestmark = [
-    pytest.mark.skip(reason="DEPRECATED: Unblock proxy tests superseded by Squid-only implementation. See tests/test_squid_only_proxy.py"),
-    pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning")
+    pytest.mark.skip(
+        reason="DEPRECATED: Unblock proxy tests superseded by Squid-only implementation. See tests/test_squid_only_proxy.py"
+    ),
+    pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning"),
 ]
 
 # Ensure project root is on sys.path for direct test execution

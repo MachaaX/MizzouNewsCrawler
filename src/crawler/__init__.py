@@ -746,17 +746,18 @@ class ContentExtractor:
 
         # Initialize multi-proxy manager
         self.proxy_manager = get_proxy_manager()
-        
+
         # MODIFIED: Override to SQUID provider when using Squid proxy
         squid_proxy_url = os.getenv("SQUID_PROXY_URL")
         if squid_proxy_url:
             # Force provider to SQUID for semantic correctness
             from .proxy_config import ProxyProvider
+
             self.proxy_manager._active_provider = ProxyProvider.SQUID
             logger.info(
                 f"🔀 Proxy provider overridden to SQUID (using {squid_proxy_url})"
             )
-        
+
         logger.info(
             f"🔀 Proxy manager initialized with provider: "
             f"{self.proxy_manager.active_provider.value}"
@@ -764,7 +765,9 @@ class ContentExtractor:
 
         # MODIFIED: Use Squid proxy for all proxy traffic
         # All proxy traffic now routes through residential Squid proxy
-        squid_proxy_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
+        squid_proxy_url = os.getenv(
+            "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+        )
         logger.info(f"All proxy traffic routing through Squid: {squid_proxy_url}")
 
         # Set initial user agent
@@ -822,17 +825,21 @@ class ContentExtractor:
         # MODIFIED: Disable Origin proxy - route ALL traffic through Squid
         # Check if we should use origin proxy (backward compatibility)
         use_origin = os.getenv("USE_ORIGIN_PROXY", "").lower() in ("1", "true", "yes")
-        
+
         if active_provider.value == "origin" or use_origin:
             # DISABLED: Origin proxy - using Squid instead
             logger.info("🔀 Origin proxy disabled - routing through Squid instead")
-            squid_proxy_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
+            squid_proxy_url = os.getenv(
+                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+            )
             squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
             self.session.proxies.update(squid_proxies)
 
         elif active_provider.value != "direct":
             # MODIFIED: Route all proxy traffic through Squid instead of Decodo
-            squid_proxy_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
+            squid_proxy_url = os.getenv(
+                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+            )
             squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
             self.session.proxies.update(squid_proxies)
             logger.info(
@@ -934,14 +941,20 @@ class ContentExtractor:
 
             if active_provider.value == "origin" or use_origin:
                 # DISABLED: Origin proxy - using Squid instead
-                logger.info(f"🔀 Origin proxy disabled for {domain} - routing through Squid instead")
-                squid_proxy_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
+                logger.info(
+                    f"🔀 Origin proxy disabled for {domain} - routing through Squid instead"
+                )
+                squid_proxy_url = os.getenv(
+                    "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+                )
                 squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
                 new_session.proxies.update(squid_proxies)
 
             elif active_provider.value != "direct":
                 # MODIFIED: Route domain sessions through Squid instead of Decodo
-                squid_proxy_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
+                squid_proxy_url = os.getenv(
+                    "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+                )
                 squid_proxies = {"http": squid_proxy_url, "https": squid_proxy_url}
                 new_session.proxies.update(squid_proxies)
 
@@ -2683,10 +2696,12 @@ class ContentExtractor:
 
             # MODIFIED: Use Squid proxy instead of Decodo unblock proxy
             # Route ALL unblock traffic through residential Squid proxy
-            squid_proxy_url = os.getenv("SQUID_PROXY_URL", "http://t9880447.eero.online:3128")
-            
+            squid_proxy_url = os.getenv(
+                "SQUID_PROXY_URL", "http://t9880447.eero.online:3128"
+            )
+
             logger.info(f"Using Squid proxy for unblock extraction: {squid_proxy_url}")
-            
+
             # Use Squid proxy directly (no authentication needed for this Squid setup)
             proxy_url = squid_proxy_url
 
@@ -2718,17 +2733,19 @@ class ContentExtractor:
                     verify=False,
                     timeout=30,
                 )
-                
+
                 html = response.text
                 html_len = len(html)
-                
-                logger.info(f"Squid proxy returned {html_len} bytes for {url} (status: {response.status_code})")
-                
+
+                logger.info(
+                    f"Squid proxy returned {html_len} bytes for {url} (status: {response.status_code})"
+                )
+
                 # Check for challenge page content patterns FIRST (before size check)
                 html_lower = html.lower()
                 challenge_patterns = [
                     "access denied",
-                    "blocked by", 
+                    "blocked by",
                     "access to this page has been denied",
                     "bot protection",
                     "security check",
@@ -2741,53 +2758,69 @@ class ContentExtractor:
                     "captcha challenge",
                     "attention required! cloudflare",
                     "just a moment...",
-                    "checking your browser"
+                    "checking your browser",
                 ]
-                
+
                 if any(pattern in html_lower for pattern in challenge_patterns):
                     logger.warning(f"Challenge page detected for {url}: proxy blocked")
-                    raise ProxyChallengeError(f"Proxy challenge/block detected for {url}: challenge_page")
-                
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: challenge_page"
+                    )
+
                 # Check if extraction was successful (accept any successful response, not just 200)
                 if response.status_code >= 400 or html_len < 1000:
-                    logger.warning(f"Squid proxy returned small/failed response for {url} (len={html_len}, status={response.status_code})")
-                    raise ProxyChallengeError(f"Proxy challenge/block detected for {url}: status_{response.status_code}")
-                
+                    logger.warning(
+                        f"Squid proxy returned small/failed response for {url} (len={html_len}, status={response.status_code})"
+                    )
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: status_{response.status_code}"
+                    )
+
                 # Check for suspiciously short responses (often challenge pages)
                 if html_len < 500 and response.status_code in [403, 503]:
-                    logger.warning(f"Suspicious short response for {url} (len={html_len}, status={response.status_code})")
-                    raise ProxyChallengeError(f"Proxy challenge/block detected for {url}: suspicious_short_response")
-                
+                    logger.warning(
+                        f"Suspicious short response for {url} (len={html_len}, status={response.status_code})"
+                    )
+                    raise ProxyChallengeError(
+                        f"Proxy challenge/block detected for {url}: suspicious_short_response"
+                    )
+
             except Exception as e:
                 logger.error(f"Squid proxy request failed for {url}: {e}")
                 # Don't wrap ProxyChallengeError - let it pass through with original message
                 if isinstance(e, ProxyChallengeError):
                     raise e
-                raise ProxyChallengeError(f"Proxy challenge/block detected for {url}: {type(e).__name__}")
+                raise ProxyChallengeError(
+                    f"Proxy challenge/block detected for {url}: {type(e).__name__}"
+                )
 
             # Extract content using newspaper3k from the HTML
             try:
                 from newspaper import Article
-                
+
                 article = Article(url)
                 # Set the HTML content directly
                 article.download_state = 2  # Article.ArticleDownloadState.SUCCESS
                 article.html = html
                 article.parse()
-                
+
                 # Build result dict
                 result = {
                     "url": url,
                     "title": article.title or "",
                     "content": article.text or "",
                     "author": ", ".join(article.authors) if article.authors else "",
-                    "publish_date": article.publish_date.isoformat() if article.publish_date else "",
+                    "publish_date": (
+                        article.publish_date.isoformat() if article.publish_date else ""
+                    ),
                     "method": "squid_proxy",
                 }
-                
-                logger.info(f"✅ Squid proxy extraction successful for {url}: {len(result['content'])} chars")
+
+                logger.info(
+                    f"✅ Squid proxy extraction successful for {url}: {len(result['content'])} chars"
+                )
                 return result
-                
+
             except Exception as e:
                 logger.error(f"Content parsing failed for {url}: {e}")
                 return {
@@ -2798,13 +2831,15 @@ class ContentExtractor:
                     "publish_date": "",
                     "method": "squid_proxy",
                 }
-                
+
         except Exception as e:
             logger.error(f"Squid proxy extraction failed for {url}: {e}")
-            # Don't wrap ProxyChallengeError - let it pass through with original message  
+            # Don't wrap ProxyChallengeError - let it pass through with original message
             if isinstance(e, ProxyChallengeError):
                 raise e
-            raise ProxyChallengeError(f"Proxy challenge/block detected for {url}: {str(e)}")
+            raise ProxyChallengeError(
+                f"Proxy challenge/block detected for {url}: {str(e)}"
+            )
 
     def _extract_with_selenium(self, url: str) -> Dict[str, Any]:
         """Extract content using persistent Selenium driver."""
