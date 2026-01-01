@@ -1,35 +1,57 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from storysniffer import StorySniffer
 
 
+FILE_EXTENSION_MARKERS = (
+    ".jpg",
+    ".png",
+    ".gif",
+    ".pdf",
+    ".css",
+    ".js",
+    ".xml",
+    ".jpeg",
+    ".svg",
+    ".json",
+)
+
+
+def _normalize_url_for_patterns(raw_url: str | None) -> str:
+    """Lowercase relevant URL components while normalizing directory paths."""
+
+    if not raw_url:
+        return ""
+
+    candidate = raw_url.strip()
+    if not candidate:
+        return ""
+
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+
+    parsed = urlparse(candidate)
+
+    scheme = parsed.scheme.lower()
+    netloc = parsed.netloc.lower()
+    path = (parsed.path or "/").lower()
+    params = parsed.params.lower()
+    query = parsed.query.lower()
+    fragment = parsed.fragment.lower()
+
+    if path and not path.endswith("/"):
+        last_segment = path.rsplit("/", 1)[-1]
+        if not last_segment.endswith(FILE_EXTENSION_MARKERS):
+            path = f"{path}/"
+
+    normalized = urlunparse((scheme, netloc, path, params, query, fragment))
+    return normalized
+
+
 def check_is_article(url, discovery_method="unknown"):
     """Conservative article detection focusing on URL path structure patterns."""
-    url_lower = (url or "").lower()
-
-    # Smart URL normalization: normalize path portion while preserving file extensions
-    # and handling query parameters/fragments properly
-    try:
-        parsed = urlparse(url_lower)
-        path = parsed.path
-        
-        # Don't normalize URLs that end with file extensions
-        file_extensions = ('.jpg', '.png', '.gif', '.pdf', '.css', '.js', '.xml', '.jpeg', '.svg', '.json')
-        if not any(path.endswith(ext) for ext in file_extensions):
-            # Normalize path by ensuring trailing slash for directories
-            if path and not path.endswith('/'):
-                path += '/'
-        
-        # Reconstruct URL with normalized path
-        url_lower = f"{parsed.scheme}://{parsed.netloc}{path}"
-        if parsed.query:
-            url_lower += f"?{parsed.query}"
-        if parsed.fragment:
-            url_lower += f"#{parsed.fragment}"
-    except Exception:
-        # If URL parsing fails, use original URL without normalization
-        pass
+    url_lower = _normalize_url_for_patterns(url)
     
     # Non-article URL patterns - designed to catch obvious non-article pages
     # Removed overly aggressive patterns like /category/, /tag/, /page/ to reduce false negatives
