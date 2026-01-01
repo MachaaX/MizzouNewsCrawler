@@ -4,7 +4,6 @@ import pytest
 
 from src.pipeline.url_filters import check_is_article
 
-
 FILE_URLS = (
     "https://example.com/image.jpg",
     "https://example.com/document.pdf",
