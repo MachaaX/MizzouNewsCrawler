@@ -288,8 +288,10 @@ class TestEnvironmentVariables:
         env_vars = {env["name"]: env for env in discovery["container"]["env"]}
 
         assert "PROXY_PROVIDER" in env_vars
-        assert env_vars["PROXY_PROVIDER"]["value"] == "decodo"
-        assert "USE_ORIGIN_PROXY" in env_vars
+        assert env_vars["PROXY_PROVIDER"]["value"] == "squid"
+        assert "SQUID_PROXY_URL" in env_vars
+        assert "SQUID_PROXY_USERNAME" in env_vars
+        assert "SQUID_PROXY_PASSWORD" in env_vars
         assert "NO_PROXY" in env_vars
 
     def test_extraction_step_has_rate_limiting_params(self, base_workflow):

@@ -19,13 +19,6 @@ spec:
     spec:
       serviceAccountName: mizzou-app
       priorityClassName: service-standard  # High priority, can preempt batch jobs
-      volumes:
-      - name: origin-sitecustomize
-        configMap:
-          name: origin-sitecustomize
-          items:
-          - key: sitecustomize.py
-            path: sitecustomize.py
       containers:
       - name: processor
         image: us-central1-docker.pkg.dev/mizzou-news-crawler/mizzou-crawler/processor:${PROCESSOR_TAG}
@@ -33,11 +26,7 @@ spec:
         command:
           - python
           - orchestration/continuous_processor.py
-        envFrom:
-        - secretRef:
-            name: origin-proxy-credentials
         env:
-        # Ensure sitecustomize is reliably imported regardless of Python minor version
         - name: PYTHONPATH
           value: "/app:/opt/origin-shim"
         # Database configuration
@@ -119,37 +108,33 @@ spec:
           value: "4"
         - name: UA_ROTATE_JITTER
           value: "0.25"
-        # Decodo IP rotation (enabled by default)
-        - name: DECODO_ROTATE_IP
-          value: "true"
-        # Proxy configuration - using Decodo ISP proxy directly
+        # Proxy configuration - Squid-only
         - name: PROXY_PROVIDER
-          value: "decodo"
-        - name: USE_ORIGIN_PROXY
-          value: "false"
+          value: "squid"
+        - name: SQUID_PROXY_URL
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: squid-proxy-url
+              optional: true
+        - name: SQUID_PROXY_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: username
+              optional: true
+        - name: SQUID_PROXY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: password
+              optional: true
         - name: SELENIUM_PROXY
           valueFrom:
             secretKeyRef:
-              name: origin-proxy-credentials
+              name: squid-proxy-credentials
               key: selenium-proxy-url
-        # Decodo Secret Manager configuration
-        - name: DECODO_SECRET_NAME
-          value: "decodo-proxy-creds"
-        # Decodo Unblock proxy (headless API) — separate credentials from ISP proxy
-        - name: UNBLOCK_PROXY_URL
-          value: "https://unblock.decodo.com:60000"
-        - name: UNBLOCK_PROXY_USER
-          valueFrom:
-            secretKeyRef:
-              name: decodo-unblock-credentials
-              key: username
-        - name: UNBLOCK_PROXY_PASS
-          valueFrom:
-            secretKeyRef:
-              name: decodo-unblock-credentials
-              key: password
-        - name: UNBLOCK_PREFER_API_POST
-          value: "false"
+              optional: true
         - name: MEDIACLOUD_SECRET_NAME
           value: "mediacloud-api-token"
         - name: GOOGLE_CLOUD_PROJECT
@@ -166,19 +151,6 @@ spec:
           limits:
             cpu: 1000m
             memory: 4Gi
-        volumeMounts:
-        - name: origin-sitecustomize
-          mountPath: /usr/local/lib/python3.11/site-packages/sitecustomize.py
-          subPath: sitecustomize.py
-          readOnly: true
-        - name: origin-sitecustomize
-          mountPath: /usr/local/lib/python3.10/site-packages/sitecustomize.py
-          subPath: sitecustomize.py
-          readOnly: true
-        - name: origin-sitecustomize
-          mountPath: /opt/origin-shim/sitecustomize.py
-          subPath: sitecustomize.py
-          readOnly: true
         livenessProbe:
           exec:
             command:

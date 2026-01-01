@@ -34,9 +34,6 @@ spec:
           - "50"  # Max articles per source
           - --days-back
           - "7"   # Look back 7 days
-        envFrom:
-        - secretRef:
-            name: origin-proxy-credentials
         env:
         # Database configuration
         - name: DATABASE_ENGINE
@@ -67,14 +64,31 @@ spec:
           value: "mizzou-news-crawler:us-central1:mizzou-db-prod"
         # Proxy configuration
         - name: PROXY_PROVIDER
-          value: "decodo"
-        - name: USE_ORIGIN_PROXY
-          value: "false"
+          value: "squid"
+        - name: SQUID_PROXY_URL
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: squid-proxy-url
+              optional: true
+        - name: SQUID_PROXY_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: username
+              optional: true
+        - name: SQUID_PROXY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: squid-proxy-credentials
+              key: password
+              optional: true
         - name: SELENIUM_PROXY
           valueFrom:
             secretKeyRef:
-              name: origin-proxy-credentials
+              name: squid-proxy-credentials
               key: selenium-proxy-url
+              optional: true
         # Rate limiting (moderate for discovery)
         - name: INTER_REQUEST_MIN
           value: "2.0"

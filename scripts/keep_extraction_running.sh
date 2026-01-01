@@ -68,7 +68,7 @@ spec:
       - "50"
       envFrom:
       - secretRef:
-          name: origin-proxy-credentials
+          name: squid-proxy-credentials
       env:
       - name: DATABASE_ENGINE
         value: "postgresql+psycopg2"

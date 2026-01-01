@@ -326,7 +326,7 @@ spec:
 - Service account: `mizzou-app`
 - Secrets:
   - `cloudsql-db-credentials`
-  - `origin-proxy-credentials`
+  - `squid-proxy-credentials`
 
 ### Installation
 

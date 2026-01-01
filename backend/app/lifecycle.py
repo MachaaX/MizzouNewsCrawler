@@ -3,7 +3,7 @@
 This module centralizes startup and shutdown handling for:
 - TelemetryStore (with background writer thread management)
 - DatabaseManager (connection pool/engine)
-- HTTP Session (with optional origin proxy adapter)
+- HTTP Session (optionally routed through the active proxy provider)
 - Other long-lived resources
 
 This ensures proper resource initialization and cleanup, and makes
@@ -15,12 +15,15 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Optional, Protocol, cast
+from typing import TYPE_CHECKING, Any, AsyncIterator, Optional, Protocol, cast
 
 import requests
 from sqlalchemy import text
 from fastapi import FastAPI, Request
 from sqlalchemy.exc import OperationalError
+
+from src.crawler.proxy_config import get_proxy_manager
+from src.crawler.utils import mask_proxy_url
 
 if TYPE_CHECKING:
     from src.models.database import DatabaseManager as _DatabaseManagerProtocol
@@ -38,19 +41,6 @@ else:  # pragma: no cover - runtime fallback for optional imports
         def get_session(self) -> Any: ...
 
 logger = logging.getLogger(__name__)
-
-
-# Expose enable_origin_proxy at module level so tests can patch it.
-EnableOriginProxyCallable = Callable[[requests.Session], None]
-
-try:  # pragma: no cover - best-effort import
-    from src.crawler.origin_proxy import enable_origin_proxy as _enable_origin_proxy
-
-    enable_origin_proxy: Optional[EnableOriginProxyCallable] = cast(
-        EnableOriginProxyCallable, _enable_origin_proxy
-    )
-except Exception:
-    enable_origin_proxy = None
 
 
 # Expose TelemetryStore and DatabaseManager module symbols so tests can
@@ -71,6 +61,40 @@ except Exception:
     DatabaseManager = None
 else:
     DatabaseManager = _DatabaseManager
+
+
+def _configure_http_session_proxies(session: requests.Session) -> None:
+    """Configure the shared HTTP session to honor the active proxy provider."""
+
+    try:
+        proxy_manager = get_proxy_manager()
+    except Exception as exc:  # pragma: no cover - proxy layer optional in tests
+        logger.warning(
+            "Proxy manager unavailable; using direct HTTP session: %s", exc
+        )
+        return
+
+    try:
+        proxies = proxy_manager.get_requests_proxies()
+        if not proxies:
+            logger.info("HTTP session configured for direct connections")
+            return
+
+        session.proxies.update(proxies)
+        active_provider = getattr(proxy_manager, "active_provider", None)
+        provider_name = (
+            getattr(active_provider, "value", str(active_provider))
+            if active_provider is not None
+            else "unknown"
+        )
+        masked_proxy = mask_proxy_url(proxies.get("https") or proxies.get("http"))
+        logger.info(
+            "HTTP session configured with %s proxy (%s)",
+            provider_name,
+            masked_proxy or "N/A",
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Failed to configure HTTP session proxies: %s", exc)
 
 
 async def startup_resources(app: FastAPI) -> None:
@@ -140,7 +164,7 @@ async def startup_resources(app: FastAPI) -> None:
         # Allow startup to continue; endpoints will fail if DB is needed
         app.state.db_manager = None
 
-    # 3. Initialize shared HTTP session with optional origin proxy
+    # 3. Initialize shared HTTP session (proxy configuration handled elsewhere)
     try:
         # Only create an HTTP session if not already provided by tests
         if (
@@ -148,33 +172,7 @@ async def startup_resources(app: FastAPI) -> None:
             or getattr(app.state, "http_session") is None
         ):
             session = requests.Session()
-
-            # Install origin proxy adapter if enabled
-            use_origin_proxy = os.getenv("USE_ORIGIN_PROXY", "").lower() in (
-                "1",
-                "true",
-                "yes",
-            )
-
-            if use_origin_proxy:
-                try:
-                    # Prefer the module-level symbol which tests can patch.
-                    if enable_origin_proxy:
-                        enable_origin_proxy(session)
-                    else:
-                        # Fall back to importing the implementation
-                        from src.crawler.origin_proxy import (
-                            enable_origin_proxy as _enable_origin_proxy,
-                        )
-
-                        _enable_origin_proxy(session)
-
-                    logger.info("Origin proxy adapter installed on shared session")
-                except Exception as exc:
-                    logger.exception(
-                        "Failed to install origin proxy adapter", exc_info=exc
-                    )
-
+            _configure_http_session_proxies(session)
             app.state.http_session = session
             logger.info("HTTP session initialized")
         else:
@@ -299,8 +297,9 @@ def get_db_manager(request: Request) -> DatabaseManagerProtocol | None:
 def get_http_session(request: Request) -> requests.Session | None:
     """Dependency that provides the shared HTTP session.
 
-    The session may have the origin proxy adapter installed if
-    USE_ORIGIN_PROXY was enabled at startup.
+    The session may have proxy configuration applied by upstream startup
+    hooks (for example, routing through the Squid provider when
+    ``PROXY_PROVIDER=squid``).
 
     Usage in route handlers:
         @app.get("/some-route")

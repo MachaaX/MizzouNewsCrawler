@@ -5,7 +5,7 @@ This document explains how to diagnose proxy and anti-bot detection issues using
 ## Overview
 
 The system uses several anti-bot detection measures:
-1. **Origin Proxy** (`proxy.kiesow.net:23432`) - Routes requests through a proxy server
+1. **Squid Proxy** (configured via `SQUID_PROXY_URL`) - Routes requests through the residential proxy tier
 2. **Cloudscraper** - Bypasses Cloudflare protection
 3. **User-Agent Rotation** - Rotates browser User-Agents per domain
 4. **Rate Limiting & Backoff** - Exponential backoff for failed requests
@@ -18,17 +18,17 @@ The system now includes comprehensive logging with emoji indicators for easy sca
 ### Session Creation
 ```
 🔧 Created new cloudscraper session (anti-Cloudflare enabled)
-🔀 Origin proxy adapter installed (proxy: http://proxy.kiesow.net:23432)
+🔀 Squid proxy routing enabled (proxy: http://squid.proxy.net:3128)
 ```
 
 ### Domain Sessions
 ```
-🔧 Created cloudscraper session for example.com (proxy: enabled, UA: Mozilla/5.0...)
+🔧 Created cloudscraper session for example.com (proxy: squid, UA: Mozilla/5.0...)
 ```
 
 ### Proxy Usage
 ```
-🔀 Proxying GET example.com via http://proxy.kiesow.net:23432 (auth: yes)
+🔀 Proxying GET example.com via http://squid.proxy.net:3128 (auth: yes)
 ✓ Proxy response 200 for example.com
 ✗ Proxy request failed for example.com: ConnectionError: ...
 ```
@@ -52,10 +52,10 @@ Run the diagnostic script to test proxy configuration and connectivity:
 
 ```bash
 # Set up environment (if not already configured)
-export USE_ORIGIN_PROXY=1
-export ORIGIN_PROXY_URL=http://proxy.kiesow.net:23432
-export PROXY_USERNAME=your_username
-export PROXY_PASSWORD=your_password
+export PROXY_PROVIDER=squid
+export SQUID_PROXY_URL=http://squid.proxy.net:3128
+export SQUID_PROXY_USERNAME=your_username   # optional
+export SQUID_PROXY_PASSWORD=your_password   # optional
 
 # Run diagnostics
 python scripts/diagnose_proxy.py
@@ -79,28 +79,21 @@ The script will:
 ================================================================================
 ENVIRONMENT VARIABLES
 ================================================================================
-  ✓ USE_ORIGIN_PROXY=1
-  ✓ ORIGIN_PROXY_URL=http://proxy.kiesow.net:23432
-  ✓ PROXY_USERNAME=your_username
-  ✓ PROXY_PASSWORD=***********
+   ✓ PROXY_PROVIDER=squid
+   ✓ SQUID_PROXY_URL=http://squid.proxy.net:3128
+   ✓ SQUID_PROXY_USERNAME=your_username
+   ✓ SQUID_PROXY_PASSWORD=***********
 
 ================================================================================
 PROXY CONNECTIVITY TEST
 ================================================================================
-Testing connectivity to: http://proxy.kiesow.net:23432
-  ✓ Proxy is reachable (status: 200)
-
-================================================================================
-CLOUDSCRAPER TEST
-================================================================================
-  ✓ cloudscraper is installed
-  ✓ cloudscraper session created successfully
+Testing connectivity to: http://squid.proxy.net:3128
   ✓ Test request succeeded (status: 200)
 
 ================================================================================
 PROXIED REQUEST TEST
 ================================================================================
-USE_ORIGIN_PROXY: True
+Active provider: squid
 
 Testing: http://httpbin.org/ip
   ✓ Status: 200
@@ -141,7 +134,7 @@ Expected output:
 
 Verify credentials are present:
 ```bash
-kubectl get secret -n production origin-proxy-credentials -o jsonpath='{.data}' | jq
+kubectl get secret -n production squid-proxy-credentials -o jsonpath='{.data}' | jq
 ```
 
 ### 3. Check Cloudscraper
@@ -195,9 +188,9 @@ kubectl logs -n production -l app=mizzou-processor --tail=500 | grep -c "Bot det
 - Direct connection errors
 
 **Solutions:**
-1. Check `USE_ORIGIN_PROXY` environment variable is set to `1` or `true`
-2. Verify proxy URL is configured: `ORIGIN_PROXY_URL`
-3. Check deployment YAML has environment variables set
+1. Ensure `PROXY_PROVIDER` is set to `squid`
+2. Verify `SQUID_PROXY_URL` (and credentials, if required) are present
+3. Check deployment YAML mounts the `squid-proxy-credentials` secret via env vars
 
 ### Issue 2: 400 BAD REQUEST from Proxy
 
@@ -227,7 +220,7 @@ kubectl logs -n production -l app=mizzou-processor --tail=500 | grep -c "Bot det
 
 **Solutions:**
 1. Set `PROXY_USERNAME` and `PROXY_PASSWORD` environment variables
-2. Check Kubernetes secret `origin-proxy-credentials` exists
+2. Check Kubernetes secret `squid-proxy-credentials` exists
 3. Verify secret is mounted in deployment
 
 ### Issue 4: Cloudflare CAPTCHA
@@ -264,8 +257,9 @@ Rate limited, backing off for 60s (attempt 1)
 Environment variables that control proxy and anti-bot behavior:
 
 ### Proxy Configuration
-- `USE_ORIGIN_PROXY` - Enable/disable proxy (1, true, yes to enable)
-- `ORIGIN_PROXY_URL` - Proxy server URL (e.g., http://proxy.kiesow.net:23432)
+- `PROXY_PROVIDER` - Active provider (must be `squid` in production)
+- `SQUID_PROXY_URL` - Proxy server URL (e.g., http://squid.proxy.net:3128)
+- `SQUID_PROXY_USERNAME` / `SQUID_PROXY_PASSWORD` - Optional credentials
 - `PROXY_USERNAME` - Proxy authentication username
 - `PROXY_PASSWORD` - Proxy authentication password
 - `NO_PROXY` - Comma-separated list of hosts to bypass
@@ -340,11 +334,11 @@ Based on the logging and diagnostics:
 
 ## Related Files
 
-- `src/crawler/origin_proxy.py` - Proxy wrapper implementation
-- `src/crawler/__init__.py` - ContentExtractor with cloudscraper
+- `src/crawler/proxy_config.py` - Proxy manager implementation
+- `src/crawler/__init__.py` - ContentExtractor with Squid routing
 - `scripts/diagnose_proxy.py` - Diagnostic tool
+- `docs/PROXY_CONFIGURATION_CRITICAL.md` - Production guardrails
 - `k8s/processor-deployment.yaml` - Deployment configuration
-- `k8s/origin-sitecustomize-configmap.yaml` - Sitecustomize integration
 
 ## Related Issues
 

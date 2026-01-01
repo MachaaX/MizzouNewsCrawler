@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from typing import Optional
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -408,6 +408,7 @@ def test_get_article_source_context_no_results():
 
 
 def test_get_articles_for_domain_with_mocked_db():
+    """Test that _get_articles_for_domain works with mocked database."""
     cleaner = BalancedBoundaryContentCleaner(db_path=":memory:")
 
     # Create mock data
@@ -416,13 +417,13 @@ def test_get_articles_for_domain_with_mocked_db():
             1,
             "https://example.com/a",
             "Article 1 content",
-            "hash1",
+            "content_hash_123",
         ),
         (
             2,
             "https://example.com/b",
             "Article 2 content",
-            "hash2",
+            "content_hash_456",
         ),
     ]
 
@@ -436,9 +437,10 @@ def test_get_articles_for_domain_with_mocked_db():
     # Pass the mocked session directly
     articles = cleaner._get_articles_for_domain("example.com", session=mock_session)
 
+    # Verify results
     assert len(articles) == 2
     assert articles[0]["url"] == "https://example.com/a"
-    assert articles[1]["text_hash"] == "hash2"
+    assert articles[1]["text_hash"] == "content_hash_456"
     mock_session.execute.assert_called_once()
 
 

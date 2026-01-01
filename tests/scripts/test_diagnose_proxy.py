@@ -1,5 +1,6 @@
 """Tests for the proxy diagnostic script."""
 
+import logging
 import os
 import sys
 from unittest.mock import MagicMock, Mock, patch
@@ -18,26 +19,39 @@ from diagnose_proxy import (  # noqa: E402
 
 def test_check_environment_with_all_vars(monkeypatch, caplog):
     """Test environment check when all variables are set."""
-    monkeypatch.setenv("USE_ORIGIN_PROXY", "1")
-    monkeypatch.setenv("ORIGIN_PROXY_URL", "http://proxy.test:9999")
-    monkeypatch.setenv("PROXY_USERNAME", "testuser")
-    monkeypatch.setenv("PROXY_PASSWORD", "testpass")
+    caplog.set_level(logging.INFO)
+    env_vars = {
+        "PROXY_PROVIDER": "squid",
+        "SQUID_PROXY_URL": "http://proxy.test:9999",
+        "SQUID_PROXY_USERNAME": "testuser",
+        "SQUID_PROXY_PASSWORD": "testpass",
+        "PROXY_POOL": "pool-a",
+        "NO_PROXY": "localhost",
+        "no_proxy": "127.0.0.1",
+    }
+
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
 
     check_environment()
 
-    # Check that function runs without error - specific format may vary
-    # but password should be masked
+    # Check that password does not appear in logs
     assert not any("testpass" in record.message for record in caplog.records)
 
 
 def test_check_environment_with_no_vars(monkeypatch, caplog):
     """Test environment check when no variables are set."""
-    monkeypatch.delenv("USE_ORIGIN_PROXY", raising=False)
-    monkeypatch.delenv("ORIGIN_PROXY_URL", raising=False)
-    monkeypatch.delenv("PROXY_USERNAME", raising=False)
-    monkeypatch.delenv("PROXY_PASSWORD", raising=False)
-    monkeypatch.delenv("NO_PROXY", raising=False)
-    monkeypatch.delenv("no_proxy", raising=False)
+    caplog.set_level(logging.WARNING)
+    for var in [
+        "PROXY_PROVIDER",
+        "SQUID_PROXY_URL",
+        "SQUID_PROXY_USERNAME",
+        "SQUID_PROXY_PASSWORD",
+        "PROXY_POOL",
+        "NO_PROXY",
+        "no_proxy",
+    ]:
+        monkeypatch.delenv(var, raising=False)
 
     check_environment()
 
@@ -55,10 +69,12 @@ def test_proxy_connectivity_success(mock_get, monkeypatch):
     mock_response.text = "Proxy OK"
     mock_get.return_value = mock_response
 
-    monkeypatch.setenv("ORIGIN_PROXY_URL", "http://proxy.test:9999")
+    monkeypatch.setenv("SQUID_PROXY_URL", "http://proxy.test:9999")
 
     # Should not raise
     test_proxy_connectivity()
+
+    mock_get.assert_called_once()
 
 
 @patch("diagnose_proxy.requests.get")
@@ -66,9 +82,10 @@ def test_proxy_connectivity_failure(mock_get, monkeypatch, caplog):
     """Test failed proxy connectivity."""
     import requests
 
+    caplog.set_level(logging.ERROR)
     mock_get.side_effect = requests.exceptions.ConnectionError("Connection refused")
 
-    monkeypatch.setenv("ORIGIN_PROXY_URL", "http://proxy.test:9999")
+    monkeypatch.setenv("SQUID_PROXY_URL", "http://proxy.test:9999")
 
     test_proxy_connectivity()
 
@@ -82,9 +99,16 @@ def test_proxy_connectivity_failure(mock_get, monkeypatch, caplog):
 
 
 @patch("diagnose_proxy.requests.Session")
-@patch("diagnose_proxy.enable_origin_proxy")
-def test_proxied_request_success(mock_enable, mock_session, monkeypatch):
+@patch("diagnose_proxy.get_proxy_manager")
+def test_proxied_request_success(mock_get_proxy_manager, mock_session):
     """Test successful proxied request."""
+    mock_manager = Mock()
+    mock_manager.get_requests_proxies.return_value = {
+        "http": "http://proxy.test:3128",
+        "https": "http://proxy.test:3128",
+    }
+    mock_get_proxy_manager.return_value = mock_manager
+
     mock_session_instance = MagicMock()
     mock_response = Mock()
     mock_response.status_code = 200
@@ -92,38 +116,41 @@ def test_proxied_request_success(mock_enable, mock_session, monkeypatch):
     mock_session_instance.get.return_value = mock_response
     mock_session.return_value = mock_session_instance
 
-    monkeypatch.setenv("USE_ORIGIN_PROXY", "1")
+    test_proxied_request()
+
+    assert mock_session_instance.get.call_count >= 1
+
+
+@patch("diagnose_proxy.get_proxy_manager")
+def test_proxied_request_no_proxy_config(mock_get_proxy_manager, caplog):
+    """Test behavior when proxy configuration is missing."""
+    caplog.set_level(logging.WARNING)
+    mock_manager = Mock()
+    mock_manager.get_requests_proxies.return_value = {}
+    mock_get_proxy_manager.return_value = mock_manager
 
     test_proxied_request()
 
-
-@patch("diagnose_proxy.requests.Session")
-@patch("diagnose_proxy.enable_origin_proxy")
-def test_proxied_request_disabled(mock_enable, mock_session, monkeypatch, caplog):
-    """Test behavior when proxy is disabled."""
-    monkeypatch.delenv("USE_ORIGIN_PROXY", raising=False)
-
-    test_proxied_request()
-
-    # Check that warning is logged
-    proxy_not_enabled = any(
-        "USE_ORIGIN_PROXY is not enabled" in record.message for record in caplog.records
+    assert any(
+        "No proxy configuration detected" in record.message for record in caplog.records
     )
-    assert proxy_not_enabled
 
 
 @patch("diagnose_proxy.requests.Session")
-@patch("diagnose_proxy.enable_origin_proxy")
-def test_proxied_request_error(mock_enable, mock_session, monkeypatch, caplog):
+@patch("diagnose_proxy.get_proxy_manager")
+def test_proxied_request_error(mock_get_proxy_manager, mock_session, caplog):
     """Test error during proxied request."""
     import requests
+
+    caplog.set_level(logging.ERROR)
+    mock_manager = Mock()
+    mock_manager.get_requests_proxies.return_value = {"http": "http://proxy.test:3128"}
+    mock_get_proxy_manager.return_value = mock_manager
 
     mock_session_instance = MagicMock()
     error = requests.exceptions.ConnectionError("Failed")
     mock_session_instance.get.side_effect = error
     mock_session.return_value = mock_session_instance
-
-    monkeypatch.setenv("USE_ORIGIN_PROXY", "1")
 
     test_proxied_request()
 
@@ -132,9 +159,13 @@ def test_proxied_request_error(mock_enable, mock_session, monkeypatch, caplog):
 
 
 @patch("diagnose_proxy.requests.Session")
-@patch("diagnose_proxy.enable_origin_proxy")
-def test_real_site_success(mock_enable, mock_session, monkeypatch):
+@patch("diagnose_proxy.get_proxy_manager")
+def test_real_site_success(mock_get_proxy_manager, mock_session):
     """Test successful real site fetch."""
+    mock_manager = Mock()
+    mock_manager.get_requests_proxies.return_value = {"http": "http://proxy.test:3128"}
+    mock_get_proxy_manager.return_value = mock_manager
+
     mock_session_instance = MagicMock()
     mock_response = Mock()
     mock_response.status_code = 200
@@ -142,23 +173,26 @@ def test_real_site_success(mock_enable, mock_session, monkeypatch):
     mock_session_instance.get.return_value = mock_response
     mock_session.return_value = mock_session_instance
 
-    monkeypatch.setenv("USE_ORIGIN_PROXY", "1")
-
     test_real_site()
+
+    assert mock_session_instance.get.call_count >= 1
 
 
 @patch("diagnose_proxy.requests.Session")
-@patch("diagnose_proxy.enable_origin_proxy")
-def test_real_site_captcha_detection(mock_enable, mock_session, monkeypatch, caplog):
+@patch("diagnose_proxy.get_proxy_manager")
+def test_real_site_captcha_detection(mock_get_proxy_manager, mock_session, caplog):
     """Test CAPTCHA detection in real site test."""
+    caplog.set_level(logging.WARNING)
+    mock_manager = Mock()
+    mock_manager.get_requests_proxies.return_value = {"http": "http://proxy.test:3128"}
+    mock_get_proxy_manager.return_value = mock_manager
+
     mock_session_instance = MagicMock()
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.text = "<html>Please complete the CAPTCHA</html>"
     mock_session_instance.get.return_value = mock_response
     mock_session.return_value = mock_session_instance
-
-    monkeypatch.setenv("USE_ORIGIN_PROXY", "1")
 
     test_real_site()
 
@@ -167,17 +201,20 @@ def test_real_site_captcha_detection(mock_enable, mock_session, monkeypatch, cap
 
 
 @patch("diagnose_proxy.requests.Session")
-@patch("diagnose_proxy.enable_origin_proxy")
-def test_real_site_cloudflare_detection(mock_enable, mock_session, monkeypatch, caplog):
+@patch("diagnose_proxy.get_proxy_manager")
+def test_real_site_cloudflare_detection(mock_get_proxy_manager, mock_session, caplog):
     """Test Cloudflare detection in real site test."""
+    caplog.set_level(logging.WARNING)
+    mock_manager = Mock()
+    mock_manager.get_requests_proxies.return_value = {"http": "http://proxy.test:3128"}
+    mock_get_proxy_manager.return_value = mock_manager
+
     mock_session_instance = MagicMock()
     mock_response = Mock()
     mock_response.status_code = 503
     mock_response.text = "<html>Cloudflare protection</html>"
     mock_session_instance.get.return_value = mock_response
     mock_session.return_value = mock_session_instance
-
-    monkeypatch.setenv("USE_ORIGIN_PROXY", "1")
 
     test_real_site()
 
@@ -189,17 +226,20 @@ def test_real_site_cloudflare_detection(mock_enable, mock_session, monkeypatch, 
 
 
 @patch("diagnose_proxy.requests.Session")
-@patch("diagnose_proxy.enable_origin_proxy")
-def test_real_site_bot_detection(mock_enable, mock_session, monkeypatch, caplog):
+@patch("diagnose_proxy.get_proxy_manager")
+def test_real_site_bot_detection(mock_get_proxy_manager, mock_session, caplog):
     """Test bot detection (403) in real site test."""
+    caplog.set_level(logging.ERROR)
+    mock_manager = Mock()
+    mock_manager.get_requests_proxies.return_value = {"http": "http://proxy.test:3128"}
+    mock_get_proxy_manager.return_value = mock_manager
+
     mock_session_instance = MagicMock()
     mock_response = Mock()
     mock_response.status_code = 403
     mock_response.text = "<html>Access denied</html>"
     mock_session_instance.get.return_value = mock_response
     mock_session.return_value = mock_session_instance
-
-    monkeypatch.setenv("USE_ORIGIN_PROXY", "1")
 
     test_real_site()
 

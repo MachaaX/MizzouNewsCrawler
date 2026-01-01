@@ -53,7 +53,7 @@ kubectl get namespace production
 
 # Verify required secrets exist
 kubectl get secret cloudsql-db-credentials -n production
-kubectl get secret origin-proxy-credentials -n production
+kubectl get secret squid-proxy-credentials -n production
 ```
 
 #### Backup Current CronJobs

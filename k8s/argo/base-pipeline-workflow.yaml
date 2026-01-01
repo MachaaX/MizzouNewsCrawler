@@ -161,9 +161,6 @@ spec:
         - --due-only
         - --log-level
         - "{{inputs.parameters.log-level}}"
-      envFrom:
-      - secretRef:
-          name: origin-proxy-credentials
       env:
       # Database configuration
       - name: DATABASE_ENGINE
@@ -200,13 +197,25 @@ spec:
         value: "mizzou-news-crawler:us-central1:mizzou-db-prod"
       # Proxy configuration
       - name: PROXY_PROVIDER
-        value: "decodo"
-      - name: USE_ORIGIN_PROXY
-        value: "false"
-      - name: DECODO_SECRET_NAME
-        value: "decodo-proxy-creds"
-      - name: UNBLOCK_PREFER_API_POST
-        value: "false"
+        value: "squid"
+      - name: SQUID_PROXY_URL
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: squid-proxy-url
+            optional: true
+      - name: SQUID_PROXY_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: username
+            optional: true
+      - name: SQUID_PROXY_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: password
+            optional: true
       - name: GOOGLE_CLOUD_PROJECT
         value: "mizzou-news-crawler"
       - name: NO_PROXY
@@ -257,9 +266,6 @@ spec:
         - "{{inputs.parameters.log-level}}"
         # No --max-batches: process entire backlog every run
         # Exit when no more URLs with status='discovered' remain
-      envFrom:
-      - secretRef:
-          name: origin-proxy-credentials
       env:
       # Database configuration
       - name: DATABASE_ENGINE
@@ -296,13 +302,25 @@ spec:
         value: "mizzou-news-crawler:us-central1:mizzou-db-prod"
       # Proxy configuration
       - name: PROXY_PROVIDER
-        value: "decodo"
-      - name: USE_ORIGIN_PROXY
-        value: "false"
-      - name: DECODO_SECRET_NAME
-        value: "decodo-proxy-creds"
-      - name: UNBLOCK_PREFER_API_POST
-        value: "false"
+        value: "squid"
+      - name: SQUID_PROXY_URL
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: squid-proxy-url
+            optional: true
+      - name: SQUID_PROXY_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: username
+            optional: true
+      - name: SQUID_PROXY_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: password
+            optional: true
       - name: GOOGLE_CLOUD_PROJECT
         value: "mizzou-news-crawler"
       - name: NO_PROXY
@@ -358,9 +376,6 @@ spec:
             --limit "{{inputs.parameters.limit}}" \
             --batches "{{inputs.parameters.batches}}" \
             --log-level "{{inputs.parameters.log-level}}"
-      envFrom:
-      - secretRef:
-          name: origin-proxy-credentials
       env:
       # Database configuration
       - name: DATABASE_ENGINE
@@ -402,33 +417,33 @@ spec:
         value: "http://work-queue.production.svc.cluster.local:8080"
       # Proxy configuration
       - name: PROXY_PROVIDER
-        value: "decodo"
-      - name: USE_ORIGIN_PROXY
-        value: "false"
-      - name: DECODO_SECRET_NAME
-        value: "decodo-proxy-creds"
-      - name: UNBLOCK_PREFER_API_POST
-        value: "false"
+        value: "squid"
+      - name: SQUID_PROXY_URL
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: squid-proxy-url
+            optional: true
+      - name: SQUID_PROXY_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: username
+            optional: true
+      - name: SQUID_PROXY_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: squid-proxy-credentials
+            key: password
+            optional: true
       - name: GOOGLE_CLOUD_PROJECT
         value: "mizzou-news-crawler"
       - name: SELENIUM_PROXY
         valueFrom:
           secretKeyRef:
-            name: origin-proxy-credentials
+            name: squid-proxy-credentials
             key: selenium-proxy-url
-      # Decodo Unblock Proxy for strong bot protection (PerimeterX, DataDome)
-      - name: UNBLOCK_PROXY_URL
-        value: "https://unblock.decodo.com:60000"
-      - name: UNBLOCK_PROXY_USER
-        valueFrom:
-          secretKeyRef:
-            name: decodo-unblock-credentials
-            key: username
-      - name: UNBLOCK_PROXY_PASS
-        valueFrom:
-          secretKeyRef:
-            name: decodo-unblock-credentials
-            key: password
+            optional: true
       # Rate limiting
       - name: INTER_REQUEST_MIN
         value: "{{inputs.parameters.inter-request-min}}"
@@ -445,9 +460,6 @@ spec:
         value: "4"
       - name: UA_ROTATE_JITTER
         value: "0.25"
-      # Decodo IP rotation
-      - name: DECODO_ROTATE_IP
-        value: "true"
       # Selenium driver memory management (prevent renderer process leak)
       - name: SELENIUM_DRIVER_REUSE_LIMIT
         value: "10"
@@ -734,4 +746,4 @@ spec:
         value: "mizzou-news-crawler:us-central1:mizzou-db-prod"
       envFrom:
       - secretRef:
-          name: origin-proxy-credentials
+          name: squid-proxy-credentials

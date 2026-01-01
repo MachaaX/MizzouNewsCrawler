@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: 'Services to build (comma-separated: processor,api,crawler,base,ml-base,migrator, or "all")'
+        description: 'Services to build (comma-separated: processor,api,crawler,base,ml-base, or "all")'
         required: false
         default: 'auto'
         type: string
@@ -23,7 +23,6 @@ jobs:
       crawler: ${{ steps.detect.outputs.crawler }}
       base: ${{ steps.detect.outputs.base }}
       ml_base: ${{ steps.detect.outputs.ml_base }}
-      migrator: ${{ steps.detect.outputs.migrator }}
       any_changed: ${{ steps.detect.outputs.any_changed }}
       services_to_build: ${{ steps.services.outputs.list }}
 
@@ -108,11 +107,10 @@ jobs:
           echo "crawler=false" >> $GITHUB_OUTPUT
           echo "base=false" >> $GITHUB_OUTPUT
           echo "ml_base=false" >> $GITHUB_OUTPUT
-          echo "migrator=false" >> $GITHUB_OUTPUT
           echo "any_changed=false" >> $GITHUB_OUTPUT
 
-          # Analyze changes and set flags
-          # Base image: only rebuild for OS/dependency changes, NOT for migrations
+          # Analyze changes and set flags with more precise detection
+          # Base image: only rebuild for OS/dependency changes
           if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.base|Dockerfile\.ci-base|requirements-base\.txt|requirements-dev\.txt'; then
             echo "base=true" >> $GITHUB_OUTPUT
             echo "✅ Base image needs rebuild (Dockerfile.base, requirements-base.txt)"
@@ -123,29 +121,25 @@ jobs:
             echo "✅ ML base image needs rebuild (Dockerfile.ml-base, requirements-ml.txt)"
           fi
 
-          # Processor: rebuild for code changes or database migrations
-          if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.processor|requirements-processor\.txt|src/|pyproject\.toml|alembic/'; then
+          # Processor: rebuild for processor-specific changes, ML code, or migrations
+          if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.processor|requirements-processor\.txt|src/(models|pipeline|utils|services|ml)/|pyproject\.toml|orchestration/|alembic/versions/'; then
             echo "processor=true" >> $GITHUB_OUTPUT
-            echo "✅ Processor needs rebuild (code/migrations: Dockerfile.processor, src/, alembic/)"
+            echo "✅ Processor needs rebuild (processor-specific code or migrations)"
           fi
 
-          # API: rebuild for code, dependencies, or database migrations
-          if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.api|requirements-api\.txt|src/|pyproject\.toml|backend/|alembic/'; then
+          # API: rebuild for API-specific changes, shared models, or migrations
+          if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.api|requirements-api\.txt|src/(models|services)/|backend/|pyproject\.toml|alembic/versions/'; then
             echo "api=true" >> $GITHUB_OUTPUT
-            echo "✅ API needs rebuild (code/migrations: Dockerfile.api, src/, backend/, alembic/)"
+            echo "✅ API needs rebuild (API-specific code or shared models)"
           fi
 
-          # Crawler: rebuild for code or dependency changes
-          if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.crawler|requirements-crawler\.txt|src/|pyproject\.toml'; then
+          # Crawler: rebuild for crawler-specific changes
+          if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.crawler|requirements-crawler\.txt|src/(crawler|models|services|utils)/|pyproject\.toml'; then
             echo "crawler=true" >> $GITHUB_OUTPUT
-            echo "✅ Crawler needs rebuild (Dockerfile.crawler, src/)"
+            echo "✅ Crawler needs rebuild (crawler-specific code)"
           fi
 
-          # Migrator: rebuild for migrations or requirements
-          if echo "$CHANGED_FILES" | grep -qE 'Dockerfile\.migrator|requirements-migrator\.txt|alembic/'; then
-            echo "migrator=true" >> $GITHUB_OUTPUT
-            echo "✅ Migrator needs rebuild (alembic migrations or requirements)"
-          fi
+          # Note: Migrator builds are handled separately and only when actual migration changes occur
 
           # Check if anything changed
           if [ -n "$CHANGED_FILES" ]; then
@@ -162,7 +156,6 @@ jobs:
           [ "${{ steps.detect.outputs.processor }}" == "true" ] && SERVICES="${SERVICES}processor "
           [ "${{ steps.detect.outputs.api }}" == "true" ] && SERVICES="${SERVICES}api "
           [ "${{ steps.detect.outputs.crawler }}" == "true" ] && SERVICES="${SERVICES}crawler "
-          [ "${{ steps.detect.outputs.migrator }}" == "true" ] && SERVICES="${SERVICES}migrator "
 
           if [ -z "$SERVICES" ]; then
             echo "list=none" >> $GITHUB_OUTPUT
@@ -181,7 +174,6 @@ jobs:
           echo "Processor rebuild: ${{ steps.detect.outputs.processor }}"
           echo "API rebuild: ${{ steps.detect.outputs.api }}"
           echo "Crawler rebuild: ${{ steps.detect.outputs.crawler }}"
-          echo "Migrator rebuild: ${{ steps.detect.outputs.migrator }}"
           echo "Services to build: ${{ steps.services.outputs.list }}"
           echo "================================"
 
@@ -304,7 +296,7 @@ jobs:
 
   build-api:
     name: Build API
-    needs: [detect-changes, build-base]
+    needs: [detect-changes, build-processor]
     runs-on: ubuntu-latest
 
     steps:
@@ -343,7 +335,7 @@ jobs:
 
   build-crawler:
     name: Build Crawler
-    needs: [detect-changes, build-base]
+    needs: [detect-changes, build-api]
     runs-on: ubuntu-latest
 
     steps:
@@ -380,48 +372,9 @@ jobs:
           fi
           echo "✅ Crawler build triggered (build ID: $BUILD_ID)"
 
-  build-migrator:
-    name: Build Migrator
-    needs: [detect-changes, build-base]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Skip migrator build (not requested)
-        if: needs.detect-changes.outputs.migrator != 'true'
-        run: 'echo "Info: Migrator image not requested; skipping Cloud Build trigger."'
-
-      - uses: actions/checkout@v4
-        if: needs.detect-changes.outputs.migrator == 'true'
-
-      - name: Authenticate to Google Cloud
-        if: needs.detect-changes.outputs.migrator == 'true'
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        if: needs.detect-changes.outputs.migrator == 'true'
-        uses: google-github-actions/setup-gcloud@v1
-
-      - name: Trigger Cloud Build
-        if: needs.detect-changes.outputs.migrator == 'true'
-        run: |
-          set +e
-          BUILD_ID=$(gcloud builds triggers run build-migrator-manual \
-            --branch="${{ github.ref_name }}" \
-            --format="value(metadata.build.id)" 2>&1)
-          EXIT_CODE=$?
-          set -e
-          if [ $EXIT_CODE -ne 0 ] || [ -z "$BUILD_ID" ]; then
-            echo "❌ Failed to trigger migrator build"
-            echo "$BUILD_ID"
-            exit 1
-          fi
-          echo "✅ Migrator build triggered (build ID: $BUILD_ID)"
-
   wait-for-builds:
     name: Wait for Cloud Builds
-    needs: [detect-changes, build-base, build-ml-base, build-processor, build-api, build-crawler, build-migrator]
+    needs: [detect-changes, build-base, build-ml-base, build-processor, build-api, build-crawler]
     if: needs.detect-changes.outputs.any_changed == 'true'
     runs-on: ubuntu-latest
     
@@ -534,74 +487,11 @@ jobs:
             BUILD_RESULT="${{ needs.wait-for-builds.result }}"
             if [ "$BUILD_RESULT" == "success" ] || [ "$BUILD_RESULT" == "skipped" ]; then
               echo "✅ All Cloud Build jobs completed successfully"
-              echo "🚀 Services are ready for deployment to production"
+              echo "🚀 Services deployed automatically via Cloud Build triggers"
+              echo "   - Kubernetes deployments updated with new image tags"
+              echo "   - Argo WorkflowTemplate updated with new image tags"
             else
               echo "❌ Build wait job failed (result: $BUILD_RESULT)"
               exit 1
             fi
           fi
-
-  deploy:
-    name: Deploy to Production
-    needs: [detect-changes, wait-for-builds]
-    if: needs.wait-for-builds.result == 'success' && needs.detect-changes.outputs.any_changed == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
-
-      - name: Get GKE Credentials
-        uses: google-github-actions/get-gke-credentials@v2
-        with:
-          cluster_name: mizzou-cluster
-          location: us-central1-a
-
-      - name: Install envsubst
-        run: sudo apt-get update && sudo apt-get install -y gettext-base
-
-      - name: Update versions and deploy
-        env:
-          PROCESSOR_CHANGED: ${{ needs.detect-changes.outputs.processor }}
-          API_CHANGED: ${{ needs.detect-changes.outputs.api }}
-          CRAWLER_CHANGED: ${{ needs.detect-changes.outputs.crawler }}
-          COMMIT_SHA: ${{ github.sha }}
-        run: |
-          # Make scripts executable
-          chmod +x scripts/apply-manifests.sh
-          
-          VERSIONS_FILE="k8s/versions.env"
-          
-          update_version() {
-              local var_name=$1
-              local new_val=$2
-              local file=$3
-              sed -i "s/export $var_name=.*/export $var_name=$new_val/" "$file"
-          }
-          
-          echo "📝 Updating versions in $VERSIONS_FILE..."
-          
-          if [ "$PROCESSOR_CHANGED" == "true" ]; then
-              update_version "PROCESSOR_TAG" "$COMMIT_SHA" "$VERSIONS_FILE"
-              echo "   Updated PROCESSOR_TAG to $COMMIT_SHA"
-          fi
-          
-          if [ "$CRAWLER_CHANGED" == "true" ]; then
-              update_version "CRAWLER_TAG" "$COMMIT_SHA" "$VERSIONS_FILE"
-              echo "   Updated CRAWLER_TAG to $COMMIT_SHA"
-          fi
-          
-          if [ "$API_CHANGED" == "true" ]; then
-              update_version "API_TAG" "$COMMIT_SHA" "$VERSIONS_FILE"
-              echo "   Updated API_TAG to $COMMIT_SHA"
-          fi
-          
-          echo "🚀 Applying manifests..."
-          ./scripts/apply-manifests.sh
