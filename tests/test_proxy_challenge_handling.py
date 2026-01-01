@@ -282,7 +282,7 @@ class TestProxyChallengeMetrics:
                     "https://fox4kc.com/test", metrics=metrics
                 )
 
-            # Verify exception message indicates challenge
+            # Verify exception message indicates challenge (should work now with proper detection)
             assert "challenge_page" in str(exc_info.value)
 
             # Verify metrics recorded the proxy challenge
@@ -337,14 +337,16 @@ class TestProxyChallengePatterns:
 
             url = "https://www.fourstateshomepage.com/test"
 
-            # Only "Access to this page has been denied" is checked in code
+            # Challenge detection now works properly - test each pattern
+            with pytest.raises(ProxyChallengeError) as exc_info:
+                extractor._extract_with_unblock_proxy(url)
+            
+            # Verify the specific pattern was detected
             if "Access to this page has been denied" in challenge_text:
-                with pytest.raises(ProxyChallengeError):
-                    extractor._extract_with_unblock_proxy(url)
+                assert "challenge_page" in str(exc_info.value)
             else:
-                # Other patterns pass through (would need to be added to detection logic)
-                result = extractor._extract_with_unblock_proxy(url)
-                assert isinstance(result, dict)
+                # Other patterns also detected by challenge detection logic
+                assert "challenge_page" in str(exc_info.value)
 
 
 class TestProxyChallengeErrorMessage:
