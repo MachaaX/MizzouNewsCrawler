@@ -123,18 +123,8 @@ class TestDomainAnalysis:
         mock_session = Mock()
         mock_session.execute.return_value = mock_result
 
-        # Mock the database connection to return our session
-        with patch.object(cleaner, "_connect_to_db") as mock_connect:
-            mock_db = Mock()
-            # Create a proper context manager mock
-            mock_session_context = MagicMock()
-            mock_session_context.__enter__.return_value = mock_session
-            mock_session_context.__exit__.return_value = None
-            mock_db.get_session.return_value = mock_session_context
-            mock_connect.return_value = mock_db
-
-            # Call the method under test
-            articles = cleaner._get_articles_for_domain("example.com")
+        # Pass the mocked session directly
+        articles = cleaner._get_articles_for_domain("example.com", session=mock_session)
 
         assert len(articles) == 2
         assert articles[0]["id"] == 1
