@@ -123,12 +123,12 @@ class TestDomainAnalysis:
         mock_session = Mock()
         mock_session.execute.return_value = mock_result
 
-        # Mock _connect_to_db to return our mock database  
+        # Mock _connect_to_db to return our mock database
         mock_db = Mock()
         mock_db.get_session.return_value.__enter__.return_value = mock_session
         mock_db.get_session.return_value.__exit__.return_value = None
 
-        with patch.object(cleaner, '_connect_to_db', return_value=mock_db):
+        with patch.object(cleaner, "_connect_to_db", return_value=mock_db):
             articles = cleaner._get_articles_for_domain("example.com")
 
         assert len(articles) == 2

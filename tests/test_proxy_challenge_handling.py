@@ -295,7 +295,7 @@ class TestProxyChallengePatterns:
         "challenge_text",
         [
             "Access to this page has been denied",
-            "Attention Required! Cloudflare", 
+            "Attention Required! Cloudflare",
             "Just a moment...",
             "Please verify you are a human",
             "Checking your browser before accessing",

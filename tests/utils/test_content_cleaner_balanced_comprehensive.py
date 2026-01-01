@@ -411,12 +411,12 @@ def test_get_articles_for_domain_with_mocked_db():
     """Test that _get_articles_for_domain works with mocked database."""
     cleaner = BalancedBoundaryContentCleaner(db_path=":memory:")
 
-    # Mock the database manager and session 
+    # Mock the database manager and session
     mock_db = Mock()
     mock_session = Mock()
     mock_db.get_session.return_value.__enter__.return_value = mock_session
     mock_db.get_session.return_value.__exit__.return_value = None
-    
+
     # Create mock data
     mock_data = [
         (
@@ -439,7 +439,7 @@ def test_get_articles_for_domain_with_mocked_db():
     mock_session.execute.return_value = mock_result
 
     # Mock _connect_to_db to return our mock database
-    with patch.object(cleaner, '_connect_to_db', return_value=mock_db):
+    with patch.object(cleaner, "_connect_to_db", return_value=mock_db):
         articles = cleaner._get_articles_for_domain("example.com")
 
     assert len(articles) == 2

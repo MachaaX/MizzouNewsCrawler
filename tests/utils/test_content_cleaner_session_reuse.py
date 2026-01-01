@@ -21,7 +21,7 @@ class TestContentCleanerBasics:
             db_path=":memory:",
             enable_telemetry=False,
         )
-        
+
         assert cleaner.db_path == ":memory:"
         assert cleaner.enable_telemetry is False
         assert cleaner.wire_detector is not None
@@ -35,7 +35,9 @@ class TestContentCleanerBasics:
 
         # Mock database methods to return no articles or patterns
         with patch.object(cleaner, "_get_articles_for_domain", return_value=[]):
-            with patch.object(cleaner, "_get_persistent_patterns_for_domain", return_value=[]):
+            with patch.object(
+                cleaner, "_get_persistent_patterns_for_domain", return_value=[]
+            ):
                 result = cleaner.analyze_domain("example.com")
 
                 assert result["domain"] == "example.com"
@@ -50,7 +52,7 @@ class TestContentCleanerBasics:
             enable_telemetry=False,
             db=mock_db,
         )
-        
+
         result = cleaner._connect_to_db()
         assert result is mock_db
 
@@ -60,12 +62,14 @@ class TestContentCleanerBasics:
             db_path=":memory:",
             enable_telemetry=False,
         )
-        
-        with patch('src.utils.content_cleaner_balanced.DatabaseManager') as mock_db_class:
+
+        with patch(
+            "src.utils.content_cleaner_balanced.DatabaseManager"
+        ) as mock_db_class:
             mock_db_instance = Mock()
             mock_db_class.return_value = mock_db_instance
-            
+
             result = cleaner._connect_to_db()
-            
+
             mock_db_class.assert_called_once()
             assert result is mock_db_instance

@@ -20,7 +20,7 @@ def test_unblock_proxy_does_not_log_password(caplog, monkeypatch):
 
     caplog.set_level(logging.INFO)
     with patch("requests.get", return_value=large_resp):
-        # Run extraction; this should use Squid proxy 
+        # Run extraction; this should use Squid proxy
         extractor._extract_with_unblock_proxy("https://example.com/article", None, None)
 
     # Ensure logs do not contain raw unblock password
